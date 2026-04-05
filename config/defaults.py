@@ -23,12 +23,27 @@ DEFAULT_EXECUTE_MODEL: str = os.environ.get("RALPH_AUTO_FOCUS_AGENT_MODEL", "aut
 # --- Agent backend ---
 DEFAULT_AGENT: str = os.environ.get("RALPH_AUTO_FOCUS_AGENT", "cursor")
 
-# --- Paths (relative to repo / worktree root) ---
-TASKS_DIR: str = ".agents/tasks"
-RALPH_DATA_DIR: str = ".agents/ralph/data"
+# --- Workspace-owned paths (relative to repository / primary checkout root) ---
+SPONTE_DIR: str = ".sponte"
+SPONTE_TASKS_SEGMENT: str = "tasks"
+SPONTE_WORKTREES_SEGMENT: str = "worktrees"
+GUARDRAILS_BASENAME: str = "guardrails.md"
+PROGRESS_BASENAME: str = "progress.md"
+
+TASKS_DIR: str = f"{SPONTE_DIR}/{SPONTE_TASKS_SEGMENT}"
+WORKTREE_BASE_DIR: str = f"{SPONTE_DIR}/{SPONTE_WORKTREES_SEGMENT}"
+SPONTE_TASKS_PATH: str = TASKS_DIR
+SPONTE_WORKTREES_PATH: str = WORKTREE_BASE_DIR
+SPONTE_GUARDRAILS_PATH: str = f"{SPONTE_DIR}/{GUARDRAILS_BASENAME}"
+SPONTE_PROGRESS_PATH: str = f"{SPONTE_DIR}/{PROGRESS_BASENAME}"
+
+# Legacy repo-relative paths (resume migration, merge precheck ignores)
+LEGACY_RALPH_DATA_DIR: str = ".agents/ralph/data"
+LEGACY_TASKS_DIR: str = ".agents/tasks"
+
+# --- Runtime under app state (see ralph_focus.app_state_paths); not a repo-relative path ---
 AUTO_FOCUS_SUBDIR: str = "auto-focus"
 NEXT_TASK_FILENAME: str = "auto-focus-next-task.txt"
-WORKTREE_BASE_DIR: str = ".worktrees"
 
 # --- Resume schema ---
 RESUME_SCHEMA_VERSION: int = 2

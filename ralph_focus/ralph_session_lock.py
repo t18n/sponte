@@ -1,4 +1,4 @@
-"""Persist current auto-focus runner id to `.agents/ralph/ralph.lock` (per repo).
+"""Persist current auto-focus runner id to Sponte app state ``ralph.lock`` (per workspace).
 
 Several concurrent ``auto-focus`` processes overwrite the same file; use
 ``--runner-id`` / ``RALPH_RUNNER_ID`` per lane for **new** sessions when running multiple terminals.

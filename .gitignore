@@ -6,3 +6,6 @@ __pycache__/
 .agents/ralph/data/
 .agents/ralph/ralph.lock
 .worktrees/
+.sponte/worktrees/
+.sponte/guardrails.md
+.sponte/progress.md

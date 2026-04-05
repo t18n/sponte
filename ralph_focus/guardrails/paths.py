@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from config.defaults import TASKS_DIR
+from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
 
 _LEGACY_TASKS_PREFIX = ".tasks/"
 
@@ -31,12 +31,16 @@ def ensure_repo_relative_path(repo_root: Path, user_path: str | Path, *, must_ex
 
 
 def validate_task_path_argument(repo_root: Path, arg: str) -> Path:
-    """Normalize task file path to absolute under repo; must be under `.agents/tasks/`."""
+    """Normalize task file path to absolute under repo; must be under `.sponte/tasks/` (or legacy paths)."""
     p = ensure_repo_relative_path(repo_root, arg, must_exist=False)
     root = repo_root.resolve()
     rel = p.relative_to(root)
     rel_s = rel.as_posix()
-    ok = rel_s.startswith(f"{TASKS_DIR}/") or rel_s.startswith(_LEGACY_TASKS_PREFIX)
+    ok = (
+        rel_s.startswith(f"{TASKS_DIR}/")
+        or rel_s.startswith(_LEGACY_TASKS_PREFIX)
+        or rel_s.startswith(f"{LEGACY_TASKS_DIR}/")
+    )
     if not ok:
         raise PathGuardError(f"task file must be under {TASKS_DIR}/: {arg}")
     return p

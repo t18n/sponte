@@ -1,6 +1,6 @@
 # Update priorities
 
-Edit **only** `.agents/tasks/priorities.md` to reflect the best next task to work on (top of list or clear section), consistent with current backlog/in-progress state.
+Edit **only** `__PRIORITIES_FILE__` to reflect the best next task to work on (top of list or clear section), consistent with current backlog/in-progress state.
 
 Keep existing structure and tone. Do not delete historical context without reason.
 

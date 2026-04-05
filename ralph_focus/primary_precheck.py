@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from config.defaults import RALPH_DATA_DIR
+from config.defaults import LEGACY_RALPH_DATA_DIR, SPONTE_GUARDRAILS_PATH, SPONTE_PROGRESS_PATH, WORKTREE_BASE_DIR
 from ralph_focus.git_ops import git
 
 
@@ -33,7 +33,16 @@ def _porcelain_path(line: str) -> str:
 
 
 def _ignored_for_merge_precheck(path_part: str) -> bool:
-    return path_part.startswith(f"{RALPH_DATA_DIR}/") or path_part.startswith(".ralph/")
+    ignored_prefixes = (
+        f"{LEGACY_RALPH_DATA_DIR}/",
+        ".ralph/",
+        f"{WORKTREE_BASE_DIR}/",
+    )
+    ignored_exact = {
+        SPONTE_GUARDRAILS_PATH,
+        SPONTE_PROGRESS_PATH,
+    }
+    return path_part.startswith(ignored_prefixes) or path_part in ignored_exact
 
 
 def _porcelain_unmerged(line: str) -> bool:

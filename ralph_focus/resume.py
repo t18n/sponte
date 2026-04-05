@@ -1,13 +1,14 @@
-"""Resume state under `.agents/ralph/data/runners/<id>/auto-focus/resume.state` (shell export format)."""
+"""Resume state under app state `runners/<id>/auto-focus/resume.state` (shell export format)."""
 
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from config.defaults import RALPH_DATA_DIR, RESUME_SCHEMA_VERSION, TASKS_DIR
-from ralph_focus.paths import auto_focus_data_dir, resume_file
+from config.defaults import LEGACY_RALPH_DATA_DIR, RESUME_SCHEMA_VERSION
+from ralph_focus.paths import auto_focus_data_dir, plan_file_for_task, ralph_data_dir, resume_file
+from ralph_focus.tasks import normalize_task_rel
 
 
 @dataclass
@@ -36,6 +37,8 @@ class ResumeState:
     total_tokens: int = 0
     no_progress_loops: int = 0
     token_warning_emitted: str = "false"
+    # Generation id for CLI --resume / locks; may differ from runners/<segment>/ when segment is hashed.
+    resume_runner_id: str = ""
 
     def to_exports(self) -> dict[str, str]:
         return {
@@ -63,6 +66,7 @@ class ResumeState:
             "R_RESUME_TOTAL_TOKENS": str(self.total_tokens),
             "R_RESUME_NO_PROGRESS_LOOPS": str(self.no_progress_loops),
             "R_RESUME_TOKEN_WARNING_EMITTED": self.token_warning_emitted,
+            "R_RESUME_RUNNER_ID": self.resume_runner_id,
         }
 
 
@@ -72,10 +76,12 @@ def write_resume(
     *,
     runner_id: str = "default",
 ) -> None:
+    rid = runner_id.strip()
+    to_write = state if (state.resume_runner_id or "").strip() or not rid else replace(state, resume_runner_id=rid)
     path = resume_file(primary, runner_id=runner_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# ralph resume (generated; do not hand-edit)"]
-    for k, v in state.to_exports().items():
+    for k, v in to_write.to_exports().items():
         lines.append(f"export {k}={shlex.quote(v)}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -138,12 +144,14 @@ def load_resume(
         return None
     if not raw.get("R_RESUME_WT_PATH") or not raw.get("R_RESUME_REL_TASK") or not raw.get("R_RESUME_LOGF"):
         return None
-    rel_task = raw.get("R_RESUME_REL_TASK", "")
-    if rel_task.startswith(".tasks/"):
-        rel_task = f"{TASKS_DIR}/{rel_task.removeprefix('.tasks/')}"
+    rel_task = normalize_task_rel(raw.get("R_RESUME_REL_TASK", ""))
     plan_rel = raw.get("R_RESUME_PLAN_REL", "")
     if plan_rel.startswith(".ralph/data/"):
-        plan_rel = f"{RALPH_DATA_DIR}/{plan_rel.removeprefix('.ralph/data/')}"
+        plan_rel = f"{LEGACY_RALPH_DATA_DIR}/{plan_rel.removeprefix('.ralph/data/')}"
+    legacy_plans_prefix = f"{LEGACY_RALPH_DATA_DIR}/plans/"
+    if plan_rel.startswith(legacy_plans_prefix):
+        stem = Path(plan_rel.removeprefix(legacy_plans_prefix)).stem
+        plan_rel = plan_file_for_task(primary, stem).resolve().as_posix()
     implement_next = _parse_int(raw, "R_RESUME_IMPLEMENT_NEXT", 1)
     improve_i = _parse_int(raw, "R_RESUME_IMPROVE_I", 1)
     improve_j = _parse_int(raw, "R_RESUME_IMPROVE_J", 0)
@@ -187,7 +195,44 @@ def load_resume(
         total_tokens=total_tokens,
         no_progress_loops=no_progress_loops,
         token_warning_emitted=raw.get("R_RESUME_TOKEN_WARNING_EMITTED", "false"),
+        resume_runner_id=raw.get("R_RESUME_RUNNER_ID", ""),
     )
+
+
+def list_recoverable_resumes(primary: Path) -> list[tuple[str, ResumeState]]:
+    """Return `(session_runner_id, state)` for each valid `resume.state` under app state runners."""
+    runners_root = ralph_data_dir(primary) / "runners"
+    if not runners_root.is_dir():
+        return []
+    out: list[tuple[str, ResumeState]] = []
+    for child in sorted(runners_root.iterdir()):
+        if not child.is_dir():
+            continue
+        seg = child.name
+        st = load_resume(primary, runner_id=seg)
+        if st is None:
+            continue
+        session_id = (st.resume_runner_id or seg).strip() or seg
+        out.append((session_id, st))
+    return out
+
+
+def resolve_runner_for_worktree(primary: Path, worktree: Path) -> tuple[str, ResumeState] | None:
+    """Map a worktree path to the session runner id and resume state; `None` if unknown or ambiguous."""
+    try:
+        want = worktree.expanduser().resolve()
+    except OSError:
+        return None
+    matches: list[tuple[str, ResumeState]] = []
+    for rid, st in list_recoverable_resumes(primary):
+        try:
+            if Path(st.wt_path).expanduser().resolve() == want:
+                matches.append((rid, st))
+        except OSError:
+            continue
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def resume_path(

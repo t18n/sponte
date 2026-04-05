@@ -6,9 +6,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from config.defaults import TASKS_DIR
+from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
 
 _LEGACY_TASKS_PREFIX = ".tasks/"
+_TASK_STAGES = ("backlog", "in-progress", "completed")
 
 _PENDING = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[[\s]\]", re.MULTILINE)
 _DONE = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[x\]", re.MULTILINE)
@@ -36,6 +37,75 @@ def _mtime_key(path: Path) -> tuple[int, int]:
 def clear_task_cache() -> None:
     _TASK_CACHE.clear()
     _PRIORITIES_CACHE.clear()
+
+
+def task_rel_path(stage: str, name: str) -> str:
+    return f"{TASKS_DIR}/{stage}/{name}"
+
+
+def task_file_path(repo: Path, stage: str, name: str) -> Path:
+    return repo / TASKS_DIR / stage / name
+
+
+def legacy_task_file_path(repo: Path, stage: str, name: str) -> Path:
+    return repo / LEGACY_TASKS_DIR / stage / name
+
+
+def priorities_file(repo: Path, filename: str = "priorities.md") -> Path:
+    current = repo / TASKS_DIR / filename
+    legacy = repo / LEGACY_TASKS_DIR / filename
+    if current.exists() or not legacy.exists():
+        return current
+    return legacy
+
+
+def task_root(repo: Path) -> str:
+    current = repo / TASKS_DIR
+    legacy = repo / LEGACY_TASKS_DIR
+    if current.exists() or not legacy.exists():
+        return TASKS_DIR
+    return LEGACY_TASKS_DIR
+
+
+def task_layout_root(task_rel: str) -> str:
+    a = task_rel.removeprefix("./")
+    if a.startswith(f"{LEGACY_TASKS_DIR}/") or a.startswith(_LEGACY_TASKS_PREFIX):
+        return LEGACY_TASKS_DIR
+    return TASKS_DIR
+
+
+def normalize_task_rel(arg: str) -> str:
+    a = arg.removeprefix("./")
+    if a.startswith("/"):
+        return Path(a).as_posix()
+    if a.startswith(f"{LEGACY_TASKS_DIR}/"):
+        a = f"{TASKS_DIR}/{a.removeprefix(f'{LEGACY_TASKS_DIR}/')}"
+    if a.startswith(_LEGACY_TASKS_PREFIX):
+        a = f"{TASKS_DIR}/{a.removeprefix(_LEGACY_TASKS_PREFIX)}"
+    prefix = f"{TASKS_DIR}/"
+    if a.startswith(prefix):
+        return a
+    if a.startswith(_TASK_STAGES):
+        return f"{TASKS_DIR}/{a}"
+    return f"{TASKS_DIR}/{a}"
+
+
+def task_stage(task_rel: str) -> str | None:
+    rel = normalize_task_rel(task_rel)
+    prefix = f"{TASKS_DIR}/"
+    if not rel.startswith(prefix):
+        return None
+    remainder = rel.removeprefix(prefix)
+    stage = remainder.split("/", maxsplit=1)[0]
+    if stage in _TASK_STAGES:
+        return stage
+    return None
+
+
+def task_with_stage(task_rel: str, stage: str) -> str:
+    a = task_rel.removeprefix("./")
+    name = Path(a).name
+    return f"{task_layout_root(a)}/{stage}/{name}"
 
 
 def task_snapshot(path: Path) -> TaskSnapshot:
@@ -82,7 +152,7 @@ def priority_task_paths(priorities_file: Path, repo: Path) -> list[Path]:
     out: list[Path] = []
     for m in _PRIORITY_LINK.finditer(text):
         rel = f"{m.group(1)}/{m.group(2)}"
-        out.append(repo / TASKS_DIR / rel)
+        out.append(normalize_task_path(repo, rel))
     _PRIORITIES_CACHE[priorities_file] = (key, out)
     return out
 
@@ -108,14 +178,24 @@ def task_label(path: Path) -> str:
 
 
 def normalize_task_path(repo: Path, arg: str) -> Path:
-    a = arg.removeprefix("./")
-    if a.startswith("/"):
-        return Path(a)
-    if a.startswith(_LEGACY_TASKS_PREFIX):
-        a = f"{TASKS_DIR}/{a.removeprefix(_LEGACY_TASKS_PREFIX)}"
+    rel = normalize_task_rel(arg)
+    if rel.startswith("/"):
+        return Path(rel)
+    current = repo / rel
+    if current.exists():
+        return current
     prefix = f"{TASKS_DIR}/"
-    if a.startswith(prefix):
-        return repo / a
-    if a.startswith(("backlog/", "in-progress/", "completed/")):
-        return repo / TASKS_DIR / a
-    return repo / TASKS_DIR / a
+    if rel.startswith(prefix):
+        legacy_rel = f"{LEGACY_TASKS_DIR}/{rel.removeprefix(prefix)}"
+        legacy = repo / legacy_rel
+        if legacy.exists():
+            return legacy
+    return current
+
+
+def concrete_task_rel(repo: Path, arg: str) -> str:
+    path = normalize_task_path(repo, arg)
+    try:
+        return path.relative_to(repo).as_posix()
+    except ValueError:
+        return normalize_task_rel(arg)

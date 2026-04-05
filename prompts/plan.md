@@ -1,6 +1,7 @@
 # Plan phase (write only the plan file)
 
-Read `__TASK_FILE__`, `.agents/ralph/guardrails.md` if present, and `.agents/ralph/progress.md` if present.
+Read `__TASK_FILE__`, `__GUARDRAILS_FILE__` if present, and `__PROGRESS_FILE__` if present.
+Also read workspace instruction files such as `AGENTS.md` and `CLAUDE.md` if they exist.
 
 Overwrite `__PLAN_FILE__` with a concise markdown plan containing:
 - goal

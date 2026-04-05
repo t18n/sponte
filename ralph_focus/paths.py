@@ -1,4 +1,4 @@
-"""Canonical paths under `.agents/ralph/data/` relative to a repo or worktree root."""
+"""Path API: workspace `.sponte/*` vs cross-workspace app state."""
 
 from __future__ import annotations
 
@@ -6,16 +6,38 @@ import hashlib
 import re
 from pathlib import Path
 
-from config.defaults import AUTO_FOCUS_SUBDIR, NEXT_TASK_FILENAME, RALPH_DATA_DIR, WORKTREE_BASE_DIR
+from config.defaults import (
+    AUTO_FOCUS_SUBDIR,
+    GUARDRAILS_BASENAME,
+    LEGACY_RALPH_DATA_DIR,
+    NEXT_TASK_FILENAME,
+    PROGRESS_BASENAME,
+    SPONTE_DIR,
+    WORKTREE_BASE_DIR,
+)
+from ralph_focus.app_state_paths import workspace_runtime_root
 
 
-def ralph_data_dir(root: Path) -> Path:
-    return root / RALPH_DATA_DIR
+def workspace_sponte_dir(root: Path) -> Path:
+    return root / SPONTE_DIR
 
 
-def ralph_lock_path(root: Path) -> Path:
-    """Session marker for the active auto-focus run (gitignored)."""
-    return root / ".agents" / "ralph" / "ralph.lock"
+def guardrails_markdown_path(root: Path) -> Path:
+    return root / SPONTE_DIR / GUARDRAILS_BASENAME
+
+
+def progress_markdown_path(root: Path) -> Path:
+    return root / SPONTE_DIR / PROGRESS_BASENAME
+
+
+def ralph_data_dir(workspace_root: Path) -> Path:
+    """Runtime data directory for this workspace (under Sponte app state, not in the repo)."""
+    return workspace_runtime_root(workspace_root)
+
+
+def ralph_lock_path(primary: Path) -> Path:
+    """Session marker for the active auto-focus run (app state, gitignored only by omission from repo)."""
+    return ralph_data_dir(primary) / "ralph.lock"
 
 
 def sanitize_runner_segment(runner_id: str) -> str:
@@ -84,20 +106,45 @@ def next_task_file(primary: Path) -> Path:
     return ralph_data_dir(primary) / NEXT_TASK_FILENAME
 
 
-def plans_dir(cwd: Path) -> Path:
-    return ralph_data_dir(cwd) / "plans"
+def plans_dir(workspace_root: Path) -> Path:
+    """Plan files live under app state; *workspace_root* must be the primary checkout root."""
+    return ralph_data_dir(workspace_root) / "plans"
 
 
-def plan_file_for_task(cwd: Path, task_stem: str) -> Path:
-    return plans_dir(cwd) / f"{task_stem}.md"
+def plan_file_for_task(workspace_root: Path, task_stem: str) -> Path:
+    return plans_dir(workspace_root) / f"{task_stem}.md"
 
 
-def base_sha_file(cwd: Path) -> Path:
-    return ralph_data_dir(cwd) / "auto-focus-base-sha"
+def base_sha_file(workspace_root: Path) -> Path:
+    return ralph_data_dir(workspace_root) / "auto-focus-base-sha"
 
 
-def base_task_file(cwd: Path) -> Path:
-    return ralph_data_dir(cwd) / "auto-focus-base-task"
+def base_task_file(workspace_root: Path) -> Path:
+    return ralph_data_dir(workspace_root) / "auto-focus-base-task"
+
+
+def legacy_base_sha_file(workspace_root: Path) -> Path:
+    return workspace_root / LEGACY_RALPH_DATA_DIR / "auto-focus-base-sha"
+
+
+def legacy_base_task_file(workspace_root: Path) -> Path:
+    return workspace_root / LEGACY_RALPH_DATA_DIR / "auto-focus-base-task"
+
+
+def readable_base_sha_file(workspace_root: Path) -> Path:
+    current = base_sha_file(workspace_root)
+    legacy = legacy_base_sha_file(workspace_root)
+    if current.exists() or not legacy.exists():
+        return current
+    return legacy
+
+
+def readable_base_task_file(workspace_root: Path) -> Path:
+    current = base_task_file(workspace_root)
+    legacy = legacy_base_task_file(workspace_root)
+    if current.exists() or not legacy.exists():
+        return current
+    return legacy
 
 
 def worktrees_base(primary: Path) -> Path:

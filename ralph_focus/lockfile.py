@@ -1,4 +1,4 @@
-"""PID-stamped cooperative locks under `.agents/ralph/data/locks/`.
+"""PID-stamped cooperative locks under Sponte app-state ``locks/``.
 
 Creation uses ``O_CREAT|O_EXCL`` so only one process can take a given lock path;
 stale locks (dead owner PID) are removed and acquisition retried.
