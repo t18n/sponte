@@ -38,7 +38,9 @@ def _git_create_linked_worktree(root: Path, name: str = "linked") -> Path:
 
 
 def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
+    from config.defaults import DEFAULT_AGENT
     from ralph_focus.workspace_settings import (
+        WorkspacePolicy,
         WorkspaceSettings,
         load_workspace_settings,
         save_workspace_settings,
@@ -57,6 +59,30 @@ def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
     loaded = load_workspace_settings(root)
     assert loaded.trunk_branch == "develop"
     assert loaded.worktree_root == ".sponte/custom-worktrees"
+    assert loaded.resolved_harness_id() == DEFAULT_AGENT
+
+    policy = WorkspacePolicy(max_phase_rounds=12, verification_required=False, merge_required=True)
+    save_workspace_settings(
+        root,
+        WorkspaceSettings(
+            trunk_branch="develop",
+            worktree_root=".sponte/custom-worktrees",
+            harness="codex",
+            plan_model="o1",
+            execute_model="gpt-4",
+            prompts={"implement": ".sponte/prompts/implement.md"},
+            guardrails_path=".sponte/guardrails.md",
+            policy=policy,
+        ),
+    )
+    again = load_workspace_settings(root)
+    assert again.harness == "codex"
+    assert again.plan_model == "o1"
+    assert again.execute_model == "gpt-4"
+    assert again.prompts.get("implement") == ".sponte/prompts/implement.md"
+    assert again.normalized_guardrails_path() == ".sponte/guardrails.md"
+    assert again.policy.max_phase_rounds == 12
+    assert again.policy.verification_required is False
 
 
 def test_known_workspaces_registry_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
