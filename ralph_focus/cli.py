@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -48,7 +49,6 @@ from ralph_focus.resume import (
     resume_path,
 )
 from ralph_focus.session_stats import SessionStats
-from ralph_focus.tasks import count_checklist, task_label
 from ralph_focus.time_parse import format_seconds_human, parse_duration_to_seconds
 from ralph_focus.token_rotation import rotation_policy_from_overrides
 from ralph_focus.worktree_cli import worktree_prune_clean, worktree_remove_interactive
@@ -58,6 +58,24 @@ from ralph_focus.workspace_resolve import (
     resolve_primary_workspace,
 )
 from ralph_focus.workspace_init import refresh_priorities_from_backlog
+from ralph_focus.task_jobs import read_session_job_status, read_task_job_status
+from ralph_focus.task_lifecycle import (
+    cancel_all_active_tasks,
+    cancel_task,
+    iter_session_status_files,
+    iter_task_status_files,
+    list_backlog_tasks,
+    prepare_task_resume,
+    task_cleanup,
+)
+from ralph_focus.tasks import (
+    compute_task_id,
+    count_checklist,
+    priority_task_paths_pending,
+    priorities_file,
+    task_label,
+)
+from ralph_focus.workspace_analytics import load_summary, read_recent_events, bump_summary
 from ralph_focus.workspace_settings import load_workspace_settings, workspace_settings_path
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
@@ -697,6 +715,14 @@ def cmd_agent(
     cfg.max_cycles_str = max_cycles_str
     stats = cfg.stats
 
+    try:
+        if resume_id is None:
+            bump_summary(primary, sessions_started=1)
+        else:
+            bump_summary(primary, sessions_resumed=1)
+    except OSError:
+        pass
+
     def on_signal(_sig: int, _frame: object | None) -> None:
         if cleanup_on_exit and cfg.current_wt_path and cfg.current_wt_path.is_dir():
             from ralph_focus.git_ops import git
@@ -900,6 +926,292 @@ def _print_session_summary(stats: SessionStats, *, deadline_hit: bool, runner_id
     console.print(Panel(t, border_style="green"))
     if deadline_hit:
         console.print("[dim]Session wall-clock limit reached.[/dim]")
+
+
+def _invoke_agent_minimal(*, workspace: Path | None, resume: str) -> None:
+    cmd_agent(
+        workspace=workspace,
+        trunk_branch=None,
+        task=None,
+        agent=None,
+        plan_model=None,
+        execute_model=None,
+        rotate_threshold_tokens=None,
+        warn_threshold_tokens=None,
+        max_cycles=None,
+        once=False,
+        max_duration=None,
+        extend_duration=None,
+        unlimited=False,
+        allow_agent_pick=None,
+        cleanup_on_exit=False,
+        progress=None,
+        resume=resume,
+        complete_worktree=None,
+        clear_resume_id=None,
+        runner_id=None,
+        skip_preflight=False,
+    )
+
+
+def _cli_primary(workspace: Path | None) -> Path:
+    return resolve_primary_workspace(
+        resolve_git_repo_root(workspace, console=console, interactive=False),
+        console=console,
+        interactive=False,
+    )
+
+
+@app.command("session-resume", help="Resume a session by id (same as agent --resume).")
+def cmd_session_resume(
+    session_id: Annotated[str, typer.Argument(metavar="SESSION_ID")],
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    _invoke_agent_minimal(workspace=workspace, resume=session_id)
+
+
+@app.command("task-resume", help="New session that resumes work on task_id.")
+def cmd_task_resume(
+    task_id: Annotated[str, typer.Argument(metavar="TASK_ID")],
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    new_sid, err = prepare_task_resume(primary, task_id)
+    if not new_sid:
+        console.print(f"[red]{err}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]New session[/green] {new_sid} [dim]for task[/dim] {task_id}")
+    _invoke_agent_minimal(workspace=workspace, resume=new_sid)
+
+
+@app.command("task-cancel", help="Abandon active task: remove worktree, clear locks, return task to backlog.")
+def cmd_task_cancel(
+    task_id: Annotated[str, typer.Argument(metavar="TASK_ID")],
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    ok, msg = cancel_task(_cli_primary(workspace), task_id)
+    if ok:
+        console.print(f"[green]{msg}[/green] {task_id}")
+    else:
+        console.print(f"[red]{msg}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("task-cancel-all", help="Cancel every active task in this workspace.")
+def cmd_task_cancel_all(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    n, errors = cancel_all_active_tasks(_cli_primary(workspace))
+    console.print(f"[green]Cancelled {n} task(s).[/green]")
+    for e in errors:
+        console.print(f"[yellow]{e}[/yellow]")
+
+
+@app.command("task-cleanup", help="Repair stale task locks and orphan in-progress metadata.")
+def cmd_task_cleanup(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    repairs, notes = task_cleanup(_cli_primary(workspace))
+    console.print(f"[green]Repairs applied:[/green] {repairs}")
+    for line in notes:
+        console.print(f"  • {line}")
+
+
+@app.command("status", help="Short summary of sessions, tasks, and suggested next command.")
+def cmd_status(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    active_sessions = 0
+    active_tasks = 0
+    for p in iter_session_status_files(primary):
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(raw, dict) and str(raw.get("active_task_id", "")).strip():
+            active_sessions += 1
+    for p in iter_task_status_files(primary):
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(raw, dict) and str(raw.get("owning_session_id", "")).strip():
+            active_tasks += 1
+    backlog_n = len(list_backlog_tasks(primary))
+    console.print(
+        Panel(
+            f"Active sessions (job index): {active_sessions}\n"
+            f"Claimed tasks: {active_tasks}\n"
+            f"Backlog tasks: {backlog_n}\n\n"
+            "Try: sponte session-current | sponte task-list | sponte agent …",
+            title="Sponte status",
+            border_style="cyan",
+        )
+    )
+
+
+@app.command("session-current", help="List sessions with active tasks from .sponte/jobs/sessions/.")
+def cmd_session_current(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    t = Table(title="Sessions (job index)")
+    t.add_column("session_id")
+    t.add_column("task_id")
+    t.add_column("phase")
+    t.add_column("worktree")
+    for p in iter_session_status_files(primary):
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        tid = str(raw.get("active_task_id", "")).strip()
+        if not tid:
+            continue
+        sid = str(raw.get("session_id", p.parent.name))
+        t.add_row(sid, tid, str(raw.get("phase", "")), str(raw.get("worktree_path", "")))
+    console.print(t)
+
+
+@app.command("session-show", help="Show one session row from the job index.")
+def cmd_session_show(
+    session_id: Annotated[str, typer.Argument(metavar="SESSION_ID")],
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    st = read_session_job_status(_cli_primary(workspace), session_id)
+    if st is None:
+        console.print("[red]No session job status for that id.[/red]")
+        raise typer.Exit(1)
+    console.print(Panel(str(st), title=f"session {session_id}", border_style="cyan"))
+
+
+@app.command("task-list", help="List backlog task files under .sponte/tasks/backlog/.")
+def cmd_task_list(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    paths = list_backlog_tasks(primary)
+    for p in paths:
+        console.print(p.relative_to(primary).as_posix())
+
+
+@app.command("task-priority", help="Show priorities.md pending links and resolved task_id when possible.")
+def cmd_task_priority(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    pri = priorities_file(primary)
+    console.print(f"[dim]{pri.relative_to(primary)}[/dim]")
+    for p in priority_task_paths_pending(pri, primary):
+        tid = compute_task_id(task_stem=p.stem, task_title=task_label(p))
+        console.print(f"  {p.relative_to(primary).as_posix()}  [cyan]{tid}[/cyan]")
+
+
+@app.command("task-current", help="Tasks with an owning session in .sponte/jobs/tasks/.")
+def cmd_task_current(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    t = Table(title="Claimed tasks")
+    t.add_column("task_id")
+    t.add_column("session")
+    t.add_column("stage")
+    t.add_column("worktree")
+    for p in iter_task_status_files(primary):
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        owner = str(raw.get("owning_session_id", "")).strip()
+        if not owner:
+            continue
+        t.add_row(
+            str(raw.get("task_id", "")),
+            owner,
+            str(raw.get("stage", "")),
+            str(raw.get("worktree_path", "")),
+        )
+    console.print(t)
+
+
+@app.command("task-show", help="Show task job status for one task_id.")
+def cmd_task_show(
+    task_id: Annotated[str, typer.Argument(metavar="TASK_ID")],
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    st = read_task_job_status(_cli_primary(workspace), task_id)
+    if st is None:
+        console.print("[red]No task job status for that id.[/red]")
+        raise typer.Exit(1)
+    console.print(Panel(str(st), title=f"task {task_id}", border_style="cyan"))
+
+
+@app.command("stats", help="Workspace analytics counters and recent events (app state).")
+def cmd_stats(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = _cli_primary(workspace)
+    s = load_summary(primary)
+    t = Table(title="Analytics summary (machine-local)")
+    t.add_column("Metric")
+    t.add_column("Count")
+    t.add_row("sessions_started", str(s.sessions_started))
+    t.add_row("sessions_resumed", str(s.sessions_resumed))
+    t.add_row("tasks_completed", str(s.tasks_completed))
+    t.add_row("tasks_cancelled", str(s.tasks_cancelled))
+    t.add_row("tasks_review_required", str(s.tasks_review_required))
+    t.add_row("cleanup_repairs", str(s.cleanup_repairs))
+    t.add_row("updated_at", s.updated_at or "—")
+    console.print(Panel(t, border_style="green"))
+    ev = read_recent_events(primary, limit=12)
+    if ev:
+        console.print("[bold]Recent events[/bold]")
+        for row in ev:
+            console.print(f"  {row}")
 
 
 @app.command(

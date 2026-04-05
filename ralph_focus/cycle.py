@@ -90,6 +90,7 @@ from ralph_focus.task_jobs import (
     write_task_job_status,
 )
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
+from ralph_focus.workspace_analytics import bump_summary
 from ralph_focus.tasks import (
     compute_task_id,
     concrete_task_rel,
@@ -492,6 +493,10 @@ def _finalize_review_required(
     clear_resume(primary, runner_id=cfg.runner_id)
     _release_task_lock(cfg)
     cfg.current_wt_path = None
+    try:
+        bump_summary(primary, tasks_review_required=1)
+    except OSError:
+        pass
     return 4
 
 
@@ -1311,6 +1316,10 @@ def run_one_cycle(
                 _release_task_lock(cfg)
                 cfg.stats.cycles_completed += 1
                 cfg.current_wt_path = None
+                try:
+                    bump_summary(primary, tasks_completed=1)
+                except OSError:
+                    pass
                 return 0
         except LockWaitTimeoutError as e:
             _append_diagnostic_log(
