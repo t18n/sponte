@@ -381,7 +381,7 @@ def _plan_tasks_interactively(primary: Path) -> list[Path]:
     return created
 
 
-@app.command("init")
+@app.command("init", help="Create `.sponte/` layout and seed tasks interactively.")
 def cmd_init() -> None:
     primary = resolve_git_repo_root(
         None,
@@ -401,7 +401,10 @@ def cmd_init() -> None:
     )
 
 
-@app.command("auto-focus")
+@app.command(
+    "auto-focus",
+    help="Run plan → implement cycles in an isolated worktree until done or limits hit.",
+)
 def cmd_auto_focus(
     workspace: Annotated[
         Path | None,
@@ -876,7 +879,10 @@ def _print_session_summary(stats: SessionStats, *, deadline_hit: bool, runner_id
         console.print("[dim]Session wall-clock limit reached.[/dim]")
 
 
-@app.command("worktree-prune-clean")
+@app.command(
+    "worktree-prune-clean",
+    help="Delete Sponte worktrees that are merged or no longer referenced.",
+)
 def cmd_prune(
     force: Annotated[bool, typer.Option("--force")] = False,
     workspace_opt: Annotated[
@@ -894,7 +900,7 @@ def cmd_prune(
     raise typer.Exit(worktree_prune_clean(ws, force=force, console=console))
 
 
-@app.command("worktree-remove")
+@app.command("worktree-remove", help="Pick and remove a Sponte worktree interactively.")
 def cmd_remove(
     workspace_opt: Annotated[
         Path | None,
@@ -911,7 +917,7 @@ def cmd_remove(
     raise typer.Exit(worktree_remove_interactive(ws, console=console))
 
 
-@app.command("plan")
+@app.command("plan", help="Turn backlog notes into `.sponte/tasks/` markdown files interactively.")
 def cmd_plan(
     workspace: Annotated[
         Path | None,
