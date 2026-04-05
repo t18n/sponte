@@ -90,8 +90,9 @@ sponte auto-focus --workspace /absolute/path/to/workspace --trunk-branch main
 # Recover one orphaned worktree and exit
 sponte auto-focus --workspace /absolute/path/to/workspace --complete-worktree "/absolute/path/to/workspace/.sponte/worktrees/raf-example-1234"
 
-# Interactive menu
-sponte interactive --workspace /absolute/path/to/workspace
+# Guided prompts (resume, worktree recovery, or task pick) — requires a TTY
+sponte auto-focus --workspace /absolute/path/to/workspace --interactive
+sponte plan --workspace /absolute/path/to/workspace --interactive
 
 # Worktree maintenance
 sponte worktree-prune-clean --workspace /absolute/path/to/workspace
@@ -146,7 +147,7 @@ After initializing a new task store, review and commit the generated `.sponte/ta
 
 `sponte auto-focus --complete-worktree <path>` uses saved Sponte runtime state to recover an orphaned worktree, resume exactly one cycle for that worktree, and then exit.
 
-The interactive menu exposes the same recovery flow and can list recoverable worktrees by number.
+`sponte auto-focus --interactive` exposes the same recovery flow and can list recoverable worktrees by number.
 
 ## AI Rules
 

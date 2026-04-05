@@ -19,15 +19,6 @@ def resolve_choice_index(*, choice_count: int, raw_index: int) -> int:
     return raw_index - 1
 
 
-def mode_choices() -> list[InteractiveChoice]:
-    return [
-        InteractiveChoice("auto-focus", "Auto-focus task cycle"),
-        InteractiveChoice("smoke", "Run smoke checks"),
-        InteractiveChoice("worktree-remove", "Remove a Ralph worktree"),
-        InteractiveChoice("worktree-prune-clean", "Prune clean Ralph worktrees"),
-    ]
-
-
 def auto_focus_entry_choices() -> list[InteractiveChoice]:
     return [
         InteractiveChoice("resume", "Resume an interrupted run"),
@@ -48,19 +39,13 @@ def _inject_workspace(args: list[str], workspace: str | None) -> list[str]:
 
 def build_exec_args(
     *,
-    mode: str,
+    mode: str = "auto-focus",
     entry: str | None = None,
     value: str | None = None,
     workspace: str | None = None,
 ) -> list[str]:
-    if mode == "smoke":
-        return ["smoke"]
-    if mode == "worktree-remove":
-        return _inject_workspace(["worktree-remove"], workspace)
-    if mode == "worktree-prune-clean":
-        return _inject_workspace(["worktree-prune-clean"], workspace)
     if mode != "auto-focus":
-        raise ValueError(f"unknown interactive mode: {mode}")
+        raise ValueError(f"unknown mode: {mode}; only auto-focus is supported")
 
     args = ["auto-focus"]
     if entry == "resume":

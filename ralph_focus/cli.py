@@ -31,12 +31,7 @@ from config.defaults import TASKS_DIR
 from ralph_focus.contracts import get_harness
 from ralph_focus.cycle import AutoFocusConfig, ProgressMode, run_one_cycle
 from ralph_focus.failure_detection import FailureKind
-from ralph_focus.interactive_setup import (
-    auto_focus_entry_choices,
-    build_exec_args,
-    mode_choices,
-    resolve_choice_index,
-)
+from ralph_focus.interactive_setup import auto_focus_entry_choices, resolve_choice_index
 from ralph_focus.paths import rotation_handoff_file
 from ralph_focus.preflight import run_preflight
 from ralph_focus.progress import cycle_line
@@ -320,81 +315,73 @@ def _pick_task_from_task_list(primary: Path) -> str | None:
     return choice_paths[idx]
 
 
-@app.command("interactive")
-def cmd_interactive(
-    workspace: Annotated[
-        Path | None,
-        typer.Option("--workspace", "-w", help="Git checkout root (optional)"),
-    ] = None,
-) -> None:
+def _prompt_auto_focus_interactive(
+    workspace: Path | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(resume, complete_worktree, task)`` for ``--interactive`` (exactly one mode set)."""
     primary = resolve_git_repo_root(
         workspace,
         console=console,
         interactive=True,
     )
-    exec_workspace = primary
-    mode = _pick_interactive_choice(
-        "Sponte interactive setup",
-        [(choice.id, choice.label) for choice in mode_choices()],
+    entry = _pick_interactive_choice(
+        "Auto-focus",
+        [(choice.id, choice.label) for choice in auto_focus_entry_choices()],
     )
-    entry: str | None = None
-    value: str | None = None
-    if mode == "auto-focus":
-        entry = _pick_interactive_choice(
-            "Auto-focus entry",
-            [(choice.id, choice.label) for choice in auto_focus_entry_choices()],
-        )
-        if entry == "resume":
-            value = Prompt.ask("Generation id to resume")
-        elif entry == "complete-worktree":
-            rows = list_recoverable_resumes(primary)
-            if not rows:
-                value = Prompt.ask("Worktree path")
+    if entry == "resume":
+        rid = Prompt.ask("Generation id to resume").strip()
+        if not rid:
+            raise ValueError("resume requires a non-empty generation id")
+        return (rid, None, None)
+    if entry == "complete-worktree":
+        rows = list_recoverable_resumes(primary)
+        if not rows:
+            raw = Prompt.ask("Worktree path")
+        else:
+            table = Table(title="Recoverable worktrees (saved resume state)")
+            table.add_column("#")
+            table.add_column("Worktree")
+            table.add_column("Phase")
+            table.add_column("Generation")
+            for idx, (runner_id, st) in enumerate(rows, 1):
+                table.add_row(str(idx), st.wt_path, st.phase, runner_id)
+            console.print(table)
+            raw_idx = IntPrompt.ask(
+                f"Choose 1–{len(rows)} or 0 to enter a worktree path",
+                default=1,
+            )
+            if raw_idx == 0:
+                raw = Prompt.ask("Worktree path")
             else:
-                table = Table(title="Recoverable worktrees (saved resume state)")
-                table.add_column("#")
-                table.add_column("Worktree")
-                table.add_column("Phase")
-                table.add_column("Generation")
-                for idx, (rid, st) in enumerate(rows, 1):
-                    table.add_row(str(idx), st.wt_path, st.phase, rid)
-                console.print(table)
-                raw_idx = IntPrompt.ask(
-                    f"Choose 1–{len(rows)} or 0 to enter a worktree path",
-                    default=1,
-                )
-                if raw_idx == 0:
-                    value = Prompt.ask("Worktree path")
-                else:
-                    try:
-                        idx = resolve_choice_index(choice_count=len(rows), raw_index=raw_idx)
-                    except ValueError as exc:
-                        console.print(f"[red]{exc}[/red]")
-                        raise typer.Exit(1) from exc
-                    value = rows[idx][1].wt_path
-            value = str(Path(value).expanduser().resolve())
-        elif entry == "specific-task":
-            exec_workspace = resolve_primary_workspace(
-                primary,
-                console=console,
-                interactive=True,
-            )
-            value = Prompt.ask("Task path", default=f"{TASKS_DIR}/backlog/")
-        elif entry == "task-list":
-            exec_workspace = resolve_primary_workspace(
-                primary,
-                console=console,
-                interactive=True,
-            )
-            value = _pick_task_from_task_list(exec_workspace)
-            if value is None:
-                raise typer.Exit(1)
-    try:
-        args = build_exec_args(mode=mode, entry=entry, value=value, workspace=str(exec_workspace))
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
-    os.execv(sys.executable, [sys.executable, "-m", "ralph_focus.cli", *args])
+                try:
+                    idx = resolve_choice_index(choice_count=len(rows), raw_index=raw_idx)
+                except ValueError as exc:
+                    console.print(f"[red]{exc}[/red]")
+                    raise typer.Exit(1) from exc
+                raw = rows[idx][1].wt_path
+        path_str = str(Path(raw).expanduser().resolve())
+        return (None, path_str, None)
+    if entry == "specific-task":
+        resolve_primary_workspace(
+            primary,
+            console=console,
+            interactive=True,
+        )
+        rel = Prompt.ask("Task path", default=f"{TASKS_DIR}/backlog/").strip()
+        if not rel:
+            raise ValueError("task path is required")
+        return (None, None, rel)
+    if entry == "task-list":
+        exec_ws = resolve_primary_workspace(
+            primary,
+            console=console,
+            interactive=True,
+        )
+        picked = _pick_task_from_task_list(exec_ws)
+        if picked is None:
+            raise typer.Exit(1)
+        return (None, None, picked)
+    raise ValueError(f"unknown auto-focus entry: {entry}")
 
 
 @app.command("auto-focus")
@@ -479,8 +466,46 @@ def cmd_auto_focus(
             help="Stable generation id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume / --complete-worktree",
         ),
     ] = None,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive",
+            "-i",
+            help="Guided prompts: resume, orphan worktree recovery, or pick a task (requires a TTY)",
+        ),
+    ] = False,
     skip_preflight: Annotated[bool, typer.Option("--skip-preflight", hidden=True)] = False,
 ) -> None:
+    if interactive:
+        if not _cli_allows_prompts():
+            console.print(
+                "[red]--interactive requires an interactive terminal (stdin must be a TTY).[/red]"
+            )
+            raise typer.Exit(1)
+        conflicts: list[str] = []
+        if task:
+            conflicts.append("TASK path")
+        if resume is not None:
+            conflicts.append("--resume")
+        if complete_worktree is not None:
+            conflicts.append("--complete-worktree")
+        if clear_resume_id is not None:
+            conflicts.append("--clear-resume")
+        if runner_id is not None:
+            conflicts.append("--runner-id")
+        if conflicts:
+            console.print(
+                "[red]--interactive cannot be combined with: "
+                + ", ".join(conflicts)
+                + "[/red]"
+            )
+            raise typer.Exit(1)
+        try:
+            resume, complete_worktree, task = _prompt_auto_focus_interactive(workspace)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
     primary = resolve_git_repo_root(
         workspace,
         console=console,
@@ -908,14 +933,6 @@ def cmd_remove(
     raise typer.Exit(worktree_remove_interactive(ws, console=console))
 
 
-@app.command("smoke")
-def cmd_smoke() -> None:
-    from ralph_focus import smoke_tests
-
-    smoke_tests.run_all(console)
-    console.print("[green]smoke OK[/green]")
-
-
 @app.command("plan")
 def cmd_plan(
     workspace: Annotated[
@@ -926,16 +943,28 @@ def cmd_plan(
         str | None,
         typer.Option("--trunk-branch", help="Override the default trunk branch stored in workspace settings"),
     ] = None,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive",
+            "-i",
+            help="Force guided workspace and init prompts (requires a TTY)",
+        ),
+    ] = False,
 ) -> None:
+    if interactive and not _cli_allows_prompts():
+        console.print("[red]plan --interactive requires an interactive terminal (stdin must be a TTY).[/red]")
+        raise typer.Exit(1)
+    interactive_mode = _cli_allows_prompts() or interactive
     primary = resolve_git_repo_root(
         workspace,
         console=console,
-        interactive=_cli_allows_prompts(),
+        interactive=interactive_mode,
     )
     initialized = ensure_tasks_layout_with_prompt(
         primary,
         console=console,
-        interactive=_cli_allows_prompts(),
+        interactive=interactive_mode,
         trunk_branch=trunk_branch,
     )
     if trunk_branch is not None and trunk_branch.strip():

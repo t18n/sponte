@@ -8,4 +8,4 @@ def test_default_verify_commands_use_sponte(monkeypatch) -> None:
 
     reloaded = importlib.reload(commands)
 
-    assert reloaded.VERIFY_COMMANDS == ("sponte smoke",)
+    assert reloaded.VERIFY_COMMANDS == ("python -m ralph_focus.smoke_tests",)

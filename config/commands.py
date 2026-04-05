@@ -10,7 +10,7 @@ def _split_command_list(raw: str) -> tuple[str, ...]:
 
 
 VERIFY_COMMANDS: tuple[str, ...] = _split_command_list(
-    os.environ.get("RALPH_VERIFY_COMMANDS", "sponte smoke")
+    os.environ.get("RALPH_VERIFY_COMMANDS", "python -m ralph_focus.smoke_tests")
 )
 
 

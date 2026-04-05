@@ -282,12 +282,3 @@ def test_auto_focus_stops_after_interactive_init(monkeypatch, tmp_path: Path) ->
     assert "review" in output
     assert "rerun" in output
 
-
-def test_build_exec_args_inserts_workspace_for_worktree_commands() -> None:
-    from ralph_focus.interactive_setup import build_exec_args
-
-    assert build_exec_args(mode="worktree-remove", workspace="/tmp/w") == [
-        "worktree-remove",
-        "--workspace",
-        "/tmp/w",
-    ]
