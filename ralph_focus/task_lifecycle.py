@@ -6,6 +6,7 @@ import json
 import secrets
 import time
 from pathlib import Path
+from typing import Any
 
 from config.defaults import GIT_IDENTITY_EMAIL, GIT_IDENTITY_NAME, RESUME_SCHEMA_VERSION, TASKS_DIR
 from ralph_focus.git_ops import git, worktree_registered
@@ -28,6 +29,7 @@ from ralph_focus.task_jobs import (
 )
 from ralph_focus.tasks import concrete_task_rel, task_stage, task_with_stage
 from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
+from ralph_focus.workspace_settings import load_workspace_settings
 from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
 
 
@@ -98,12 +100,16 @@ def cancel_task(repo: Path, task_id: str) -> tuple[bool, str]:
         bump_summary(repo, tasks_cancelled=1)
     except OSError:
         pass
+    ws = load_workspace_settings(repo)
     emit_lifecycle_event(
         repo,
         event="task_cancelled",
         outcome="ok",
         session_id=sess,
         task_id=task_id,
+        harness=ws.resolved_harness_id(),
+        plan_model=ws.resolved_plan_model(),
+        execute_model=ws.resolved_execute_model(),
     )
     return True, "cancelled"
 
@@ -188,10 +194,14 @@ def task_cleanup(repo: Path) -> tuple[int, list[str]]:
             bump_summary(repo, cleanup_repairs=repairs)
         except OSError:
             pass
+        ws = load_workspace_settings(repo)
         emit_lifecycle_event(
             repo,
             event="task_cleanup",
             outcome="repaired",
+            harness=ws.resolved_harness_id(),
+            plan_model=ws.resolved_plan_model(),
+            execute_model=ws.resolved_execute_model(),
             metadata={"repairs": repairs, "notes": notes},
         )
     return repairs, notes
@@ -291,13 +301,20 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
             branch=br_name,
         ),
     )
+    ws = load_workspace_settings(repo)
+    meta: dict[str, Any] = {"from_session_id": old_sess} if old_sess else {}
+    if prev:
+        meta["prior_phase"] = prev.phase
     emit_lifecycle_event(
         repo,
         event="task_ownership_transferred",
         outcome="ok",
         session_id=new_rid,
         task_id=task_id,
-        metadata={"from_session_id": old_sess} if old_sess else {},
+        harness=ws.resolved_harness_id(),
+        plan_model=ws.resolved_plan_model(),
+        execute_model=ws.resolved_execute_model(),
+        metadata=meta,
     )
     return new_rid, ""
 

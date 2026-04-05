@@ -40,7 +40,7 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
 | `guardrails.path` | Workspace guardrails markdown |
 | `policy.max_phase_rounds` | Phase budget before `review-required` |
 | `policy.verification_required` | When `false`, VERIFY phase is skipped |
-| `policy.merge_required` | When `false`, trunk merge is skipped after wrap; you merge manually |
+| `policy.merge_required` | When `false`, trunk merge and **primary merge prechecks** are skipped after wrap; you merge manually. Task worktree must still be clean for removal. |
 
 ## Init validation
 

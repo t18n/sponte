@@ -18,3 +18,4 @@
 - Cross-workspace app state paths and `SPONTE_STATE_DIR` are documented in README; on macOS the default base is under `~/Library/Application Support/sponte`.
 - Set `SPONTE_INIT_SKIP_HARNESS_PROBE=1` to skip harness and model probing during `sponte init` (e.g. tests or offline runs).
 - Git worktrees default under `.sponte/worktrees`; override with `worktree_root` in `.sponte/settings.json`.
+- Per-session resume and logs under app state use `runners/<id>/agent/`; legacy `auto-focus/` is still read for resume when the new path is absent.

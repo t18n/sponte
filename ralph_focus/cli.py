@@ -1282,9 +1282,30 @@ def cmd_stats(
     ev = read_recent_events(primary, limit=12)
     if ev:
         et = Table(title="Recent events (newest last)")
+
+        def _fmt_dur(raw: object) -> str:
+            if raw is None:
+                return "—"
+            try:
+                sec = float(raw)
+            except (TypeError, ValueError):
+                return "—"
+            return f"{sec:.1f}s" if sec > 0 else "—"
+
+        def _fmt_cycles(raw: object) -> str:
+            if raw is None:
+                return "—"
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                return "—"
+            return str(n) if n > 0 else "—"
+
         et.add_column("time", style="dim")
         et.add_column("event")
         et.add_column("outcome")
+        et.add_column("dur", justify="right")
+        et.add_column("cyc", justify="right")
         et.add_column("session")
         et.add_column("task")
         for row in ev:
@@ -1292,8 +1313,10 @@ def cmd_stats(
                 str(row.get("timestamp", ""))[:19],
                 str(row.get("event", "")),
                 str(row.get("outcome", "")),
-                str(row.get("session_id", ""))[:16],
-                str(row.get("task_id", ""))[:24],
+                _fmt_dur(row.get("duration_sec")),
+                _fmt_cycles(row.get("cycles")),
+                str(row.get("session_id", ""))[:14],
+                str(row.get("task_id", ""))[:20],
             )
         console.print(et)
 

@@ -506,6 +506,9 @@ def _finalize_review_required(
         harness=cfg.harness.id,
         plan_model=cfg.plan_model,
         execute_model=cfg.execute_model,
+        duration_sec=max(0.0, time.time() - cfg.stats.started_wall),
+        cycles=cfg.phase_agent_rounds,
+        metadata={"max_phase_rounds": cfg.max_phase_rounds},
     )
     return 4
 
@@ -866,6 +869,21 @@ def run_one_cycle(
             improve_j,
             conflict_next,
         )
+        emit_lifecycle_event(
+            primary,
+            event="task_claimed",
+            outcome="ok",
+            session_id=cfg.runner_id,
+            task_id=cfg.task_id,
+            harness=cfg.harness.id,
+            plan_model=cfg.plan_model,
+            execute_model=cfg.execute_model,
+            metadata={
+                "rel_task": rel_task,
+                "branch": br_name,
+                "worktree_path": str(wt_path),
+            },
+        )
 
     cfg.phase_agent_rounds = 0
 
@@ -1135,64 +1153,11 @@ def run_one_cycle(
                     )
                     return 1
 
-                start_pre_round = conflict_next if phase == "PRIMARY_PREMERGE" else 1
-                pre_state = primary_merge_precheck_state(primary)
+                if cfg.merge_required:
+                    start_pre_round = conflict_next if phase == "PRIMARY_PREMERGE" else 1
+                    pre_state = primary_merge_precheck_state(primary)
 
-                if phase == "PRIMARY_PREMERGE" and pre_state.kind == PrimaryPrecheckKind.CLEAN:
-                    phase = "MERGE"
-                    conflict_next = 1
-                    _persist(
-                        cfg,
-                        logf,
-                        wt_path,
-                        br_name,
-                        main_ref,
-                        rel_task,
-                        plan_rel,
-                        phase,
-                        implement_next,
-                        improve_i,
-                        improve_j,
-                        conflict_next,
-                    )
-                elif pre_state.kind != PrimaryPrecheckKind.CLEAN:
-                    _append_diagnostic_log(
-                        logf,
-                        "Merge precheck: primary not clean (outside Sponte-ignored paths)",
-                        pre_state.detail or pre_state.kind.value,
-                    )
-                    merge_precheck_warning(
-                        "Primary checkout is not clean before Ralph merge; see run log for paths.",
-                        pre_state.detail,
-                    )
-                    if pre_state.kind == PrimaryPrecheckKind.REBASE_IN_PROGRESS:
-                        merge_precheck_failed(
-                            "Primary checkout has a rebase in progress.",
-                            pre_state.detail,
-                        )
-                        return 1
-                    if pre_state.kind == PrimaryPrecheckKind.CONFLICT_DIRTY:
-                        precheck_rc = _resolve_primary_precheck_conflicts(
-                            cfg,
-                            logf,
-                            wt_path,
-                            br_name,
-                            main_ref,
-                            rel_task,
-                            plan_rel,
-                            implement_next,
-                            improve_i,
-                            improve_j,
-                            start_pre_round,
-                        )
-                        if precheck_rc == 3:
-                            return 3
-                        if precheck_rc != 0:
-                            merge_precheck_failed(
-                                "Could not resolve primary merge conflicts before Ralph merge.",
-                                "See run log (PRIMARY_PREMERGE sections). Fix git state on the primary checkout, then retry with --resume RUNNER_ID.",
-                            )
-                            return 1
+                    if phase == "PRIMARY_PREMERGE" and pre_state.kind == PrimaryPrecheckKind.CLEAN:
                         phase = "MERGE"
                         conflict_next = 1
                         _persist(
@@ -1209,62 +1174,135 @@ def run_one_cycle(
                             improve_j,
                             conflict_next,
                         )
-                        if cfg.progress != "off":
-                            step_done(
-                                "primary pre-merge",
-                                "resolved conflicts on primary checkout",
-                                model=cfg.execute_model,
-                                token_total=cfg.stats.rotation_tokens(),
-                            )
-                    else:
-                        merge_precheck_failed(
-                            "Primary has local changes outside Sponte-ignored paths; commit or discard them, then retry.",
+                    elif pre_state.kind != PrimaryPrecheckKind.CLEAN:
+                        _append_diagnostic_log(
+                            logf,
+                            "Merge precheck: primary not clean (outside Sponte-ignored paths)",
+                            pre_state.detail or pre_state.kind.value,
+                        )
+                        merge_precheck_warning(
+                            "Primary checkout is not clean before Ralph merge; see run log for paths.",
                             pre_state.detail,
+                        )
+                        if pre_state.kind == PrimaryPrecheckKind.REBASE_IN_PROGRESS:
+                            merge_precheck_failed(
+                                "Primary checkout has a rebase in progress.",
+                                pre_state.detail,
+                            )
+                            return 1
+                        if pre_state.kind == PrimaryPrecheckKind.CONFLICT_DIRTY:
+                            precheck_rc = _resolve_primary_precheck_conflicts(
+                                cfg,
+                                logf,
+                                wt_path,
+                                br_name,
+                                main_ref,
+                                rel_task,
+                                plan_rel,
+                                implement_next,
+                                improve_i,
+                                improve_j,
+                                start_pre_round,
+                            )
+                            if precheck_rc == 3:
+                                return 3
+                            if precheck_rc != 0:
+                                merge_precheck_failed(
+                                    "Could not resolve primary merge conflicts before Ralph merge.",
+                                    "See run log (PRIMARY_PREMERGE sections). Fix git state on the primary checkout, then retry with --resume RUNNER_ID.",
+                                )
+                                return 1
+                            phase = "MERGE"
+                            conflict_next = 1
+                            _persist(
+                                cfg,
+                                logf,
+                                wt_path,
+                                br_name,
+                                main_ref,
+                                rel_task,
+                                plan_rel,
+                                phase,
+                                implement_next,
+                                improve_i,
+                                improve_j,
+                                conflict_next,
+                            )
+                            if cfg.progress != "off":
+                                step_done(
+                                    "primary pre-merge",
+                                    "resolved conflicts on primary checkout",
+                                    model=cfg.execute_model,
+                                    token_total=cfg.stats.rotation_tokens(),
+                                )
+                        else:
+                            merge_precheck_failed(
+                                "Primary has local changes outside Sponte-ignored paths; commit or discard them, then retry.",
+                                pre_state.detail,
+                            )
+                            return 1
+
+                    pre_final = primary_merge_precheck_state(primary)
+                    if pre_final.kind != PrimaryPrecheckKind.CLEAN:
+                        merge_precheck_failed(
+                            "Primary checkout is still not ready to merge after precheck.",
+                            pre_final.detail or pre_final.kind.value,
                         )
                         return 1
 
-                pre_final = primary_merge_precheck_state(primary)
-                if pre_final.kind != PrimaryPrecheckKind.CLEAN:
-                    merge_precheck_failed(
-                        "Primary checkout is still not ready to merge after precheck.",
-                        pre_final.detail or pre_final.kind.value,
-                    )
-                    return 1
+                    mh_code, _, _ = git(primary, *git_verify_ref_args("MERGE_HEAD"))
+                    if mh_code == 0 and phase != "MERGE_CONFLICT":
+                        merge_head_hint = (
+                            "Resolve or abort the in-progress merge on the primary checkout (e.g. git merge --abort), "
+                            "then retry with --resume RUNNER_ID."
+                        )
+                        _append_diagnostic_log(
+                            logf,
+                            "MERGE blocked: MERGE_HEAD exists on primary but phase is not MERGE_CONFLICT",
+                            merge_head_hint,
+                        )
+                        merge_precheck_failed(
+                            "Primary checkout has an unfinished merge (MERGE_HEAD).",
+                            merge_head_hint,
+                        )
+                        return 1
 
-                mh_code, _, _ = git(primary, *git_verify_ref_args("MERGE_HEAD"))
-                if mh_code == 0 and phase != "MERGE_CONFLICT":
-                    merge_head_hint = (
-                        "Resolve or abort the in-progress merge on the primary checkout (e.g. git merge --abort), "
-                        "then retry with --resume RUNNER_ID."
-                    )
-                    _append_diagnostic_log(
-                        logf,
-                        "MERGE blocked: MERGE_HEAD exists on primary but phase is not MERGE_CONFLICT",
-                        merge_head_hint,
-                    )
-                    merge_precheck_failed(
-                        "Primary checkout has an unfinished merge (MERGE_HEAD).",
-                        merge_head_hint,
-                    )
-                    return 1
-
-                if phase == "MERGE_CONFLICT" and mh_code != 0:
-                    phase = "MERGE"
-                    conflict_next = 1
-                    _persist(
-                        cfg,
-                        logf,
-                        wt_path,
-                        br_name,
-                        main_ref,
-                        rel_task,
-                        plan_rel,
-                        phase,
-                        implement_next,
-                        improve_i,
-                        improve_j,
-                        conflict_next,
-                    )
+                    if phase == "MERGE_CONFLICT" and mh_code != 0:
+                        phase = "MERGE"
+                        conflict_next = 1
+                        _persist(
+                            cfg,
+                            logf,
+                            wt_path,
+                            br_name,
+                            main_ref,
+                            rel_task,
+                            plan_rel,
+                            phase,
+                            implement_next,
+                            improve_i,
+                            improve_j,
+                            conflict_next,
+                        )
+                else:
+                    _append_phase_log(logf, "PRIMARY_MERGE_PRECHECK_SKIPPED_POLICY")
+                    if phase in ("PRIMARY_PREMERGE", "MERGE_CONFLICT"):
+                        phase = "MERGE"
+                        conflict_next = 1
+                        _persist(
+                            cfg,
+                            logf,
+                            wt_path,
+                            br_name,
+                            main_ref,
+                            rel_task,
+                            plan_rel,
+                            phase,
+                            implement_next,
+                            improve_i,
+                            improve_j,
+                            conflict_next,
+                        )
 
                 _append_phase_log(logf, f"MERGE_TO_{main_ref}")
                 feature_already_merged = is_branch_merged_into(primary, br_name, main_ref)
@@ -1365,7 +1403,12 @@ def run_one_cycle(
                     harness=cfg.harness.id,
                     plan_model=cfg.plan_model,
                     execute_model=cfg.execute_model,
-                    metadata={"merge_into_trunk": cfg.merge_required},
+                    duration_sec=max(0.0, time.time() - cfg.stats.started_wall),
+                    cycles=cfg.stats.agent_steps,
+                    metadata={
+                        "merge_into_trunk": cfg.merge_required,
+                        "cycles_completed": cfg.stats.cycles_completed,
+                    },
                 )
                 return 0
         except LockWaitTimeoutError as e:
