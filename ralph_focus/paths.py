@@ -154,3 +154,49 @@ def worktrees_base(primary: Path) -> Path:
     if configured.is_absolute():
         return configured
     return primary / configured
+
+
+def sponte_jobs_root(root: Path) -> Path:
+    """Repo-local job index under ``.sponte/jobs/`` (tasks + sessions)."""
+    return workspace_sponte_dir(root) / "jobs"
+
+
+def sponte_jobs_tasks_root(root: Path) -> Path:
+    return sponte_jobs_root(root) / "tasks"
+
+
+def sponte_jobs_sessions_root(root: Path) -> Path:
+    return sponte_jobs_root(root) / "sessions"
+
+
+def sanitize_job_segment(segment: str) -> str:
+    """Filesystem-safe single path segment for job ids (defense in depth)."""
+    s = segment.strip()
+    if not s:
+        return "unnamed"
+    if re.fullmatch(r"[a-zA-Z0-9._-]{1,120}", s):
+        return s[:120]
+    h = hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+    return f"h-{h}"
+
+
+def sponte_job_task_dir(root: Path, task_id: str) -> Path:
+    return sponte_jobs_tasks_root(root) / sanitize_job_segment(task_id)
+
+
+def sponte_job_session_dir(root: Path, session_id: str) -> Path:
+    return sponte_jobs_sessions_root(root) / sanitize_runner_segment(session_id)
+
+
+def sponte_job_session_task_dir(root: Path, session_id: str, task_id: str) -> Path:
+    return sponte_job_session_dir(root, session_id) / "tasks" / sanitize_job_segment(task_id)
+
+
+def workspace_sponte_locks_dir(root: Path) -> Path:
+    """Cooperative locks under ``.sponte/locks/`` (workspace-owned ownership)."""
+    return workspace_sponte_dir(root) / "locks"
+
+
+def workspace_task_claim_lock_path(root: Path, task_id: str) -> Path:
+    """Exclusive claim lock for a task id (prevents duplicate active claims)."""
+    return workspace_sponte_locks_dir(root) / "tasks" / f"{sanitize_job_segment(task_id)}.lock"

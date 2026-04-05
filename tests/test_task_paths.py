@@ -49,3 +49,33 @@ def test_priority_task_paths_pending_falls_back_to_legacy_layout(tmp_path: Path)
     legacy_priorities.write_text("- [Demo](./backlog/demo.md)\n", encoding="utf-8")
 
     assert priority_task_paths_pending(priorities_file(tmp_path), tmp_path) == [legacy_task]
+
+
+def test_compute_task_id_uses_stem_and_title_hash() -> None:
+    from ralph_focus.tasks import compute_task_id, task_title_hash_suffix
+
+    tid = compute_task_id(task_stem="add-login", task_title="Add OAuth login")
+    assert tid.startswith("add-login-")
+    assert len(tid.split("-")[-1]) == 6
+    assert task_title_hash_suffix("Add OAuth login") == tid.rsplit("-", 1)[-1]
+
+
+def test_sponte_job_paths_under_workspace(tmp_path: Path) -> None:
+    from ralph_focus.paths import (
+        sponte_job_session_dir,
+        sponte_job_session_task_dir,
+        sponte_job_task_dir,
+        sponte_jobs_root,
+        workspace_task_claim_lock_path,
+    )
+
+    root = tmp_path / "repo"
+    assert sponte_jobs_root(root) == root / ".sponte" / "jobs"
+    assert sponte_job_task_dir(root, "feat-abc123") == root / ".sponte" / "jobs" / "tasks" / "feat-abc123"
+    assert sponte_job_session_dir(root, "rap-deadbeef") == root / ".sponte" / "jobs" / "sessions" / "rap-deadbeef"
+    assert sponte_job_session_task_dir(root, "rap-x", "feat-abc123") == (
+        root / ".sponte" / "jobs" / "sessions" / "rap-x" / "tasks" / "feat-abc123"
+    )
+    assert workspace_task_claim_lock_path(root, "feat-abc123") == (
+        root / ".sponte" / "locks" / "tasks" / "feat-abc123.lock"
+    )

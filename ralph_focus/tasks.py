@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -199,3 +200,26 @@ def concrete_task_rel(repo: Path, arg: str) -> str:
         return path.relative_to(repo).as_posix()
     except ValueError:
         return normalize_task_rel(arg)
+
+
+def slugify_task_stem_for_id(stem: str) -> str:
+    """Slug from a task filename stem for ``task_id`` prefix."""
+    s = stem.strip().lower()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s)
+    return s.strip("-") or "task"
+
+
+def task_title_hash_suffix(title: str, *, length: int = 6) -> str:
+    """Stable hex suffix from task title only (``task_id`` uniqueness)."""
+    return hashlib.sha256(title.strip().encode("utf-8")).hexdigest()[:length]
+
+
+def compute_task_id(*, task_stem: str, task_title: str) -> str:
+    """
+    ``task_id = <slugified-stem>-<6charhash(title)>``.
+
+    Changing the task title changes the id; stem comes from the markdown filename.
+    """
+    stem = Path(task_stem).stem if task_stem.strip() else "task"
+    slug = slugify_task_stem_for_id(stem)
+    return f"{slug}-{task_title_hash_suffix(task_title)}"
