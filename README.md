@@ -1,24 +1,79 @@
 # Sponte
 
-Sponte is a standalone CLI for unattended task cycles across multiple git workspaces.
+Sponte is a standalone CLI for unattended task cycles across multiple git workspaces. The name is Latin *sponte*, meaning *of one’s own accord*.
 
-The public package and command are `sponte`. Internal module names still use older identifiers in places, but workspace behavior is now Sponte-owned.
+The public package and command are `sponte`.
 
 ## Install
 
-For local development in this repo:
+### Local only (this computer, no PyPI)
+
+You do not need PyPI or a release tag to use Sponte on one machine. From a clone of this repo:
+
+Run inside the project (uses the repo virtualenv):
 
 ```bash
 uv sync
 uv run sponte --help
 ```
 
-To run `sponte` from anywhere on your machine during development:
+Install the `sponte` command globally for your user while you keep editing the repo (editable):
 
 ```bash
 uv tool install --editable .
 sponte --help
 ```
+
+Install into the active environment from the source tree:
+
+```bash
+uv pip install .
+```
+
+Build a wheel and install that artifact (useful to mimic a release without uploading):
+
+```bash
+uv build
+uv pip install dist/sponte-*.whl
+```
+
+### From PyPI
+
+After a public release is published:
+
+```bash
+pip install sponte
+# or
+uv tool install sponte
+```
+
+## Publishing to PyPI
+
+Releases are automated with GitHub Actions when you push a version tag. The workflow alone is not enough until PyPI trusts this repository.
+
+### One-time setup
+
+1. **Create the project on PyPI** (if it does not exist): the first successful upload to a name creates the project; see [PyPI help](https://pypi.org/help/) if you need to claim or transfer a name.
+2. **Trusted Publisher**: In PyPI, open the `sponte` project → **Publishing** → **Add a new pending publisher** → choose **GitHub** and set:
+   - Owner / repository: this GitHub repo
+   - Workflow name: `publish.yml`
+   - Environment name: `pypi` (must match the workflow’s `environment: pypi`)
+3. **GitHub environment** (recommended): Create an environment named `pypi` in the repo settings. You can add protection rules (required reviewers) so tag pushes do not publish without approval.
+
+See PyPI’s [Trusted Publishers](https://docs.pypi.org/trusted-publishers/) documentation for details.
+
+### Release checklist
+
+1. Bump `version` in `pyproject.toml` and merge to your release branch (e.g. `main`).
+2. Run tests, e.g. `uv run pytest`.
+3. Create and push an annotated tag whose version matches `pyproject.toml` (leading `v`):
+
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+The workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) builds with `uv build` and fails if the tag (without `v`) does not equal `project.version` in `pyproject.toml`.
 
 ## Core Commands
 
@@ -103,3 +158,20 @@ Sponte runs agent work from the target workspace and prompts agents to read work
 - config defaults: `config/`
 - prompt templates: `prompts/`
 - tests: `tests/`
+
+
+## Philosophy
+
+Sponte is built around a simple idea: keep task state explicit, keep workspace rules close to the code, and let an agent run one focused unattended cycle at a time. It prefers Markdown task queues, isolated git worktrees, and resumable local state over hidden orchestration.
+
+There is intentionally no built-in `--parallel N` mode. If you want multiple runs at once, start multiple `sponte` sessions from different terminals. That design keeps each run legible and recoverable as its own session, avoids hiding scheduler behavior behind one parent process, and lets cooperative locks handle shared repo coordination only where needed.
+
+## Ralph Lineage
+
+Sponte keeps the core Ralph workflow: pick a task, create or resume a worktree, run planner/executor-style phases, verify the result, and merge progress back into the workspace. In that sense it is very close to the original Ralph Wiggum-style loop.
+
+What changed is the product layer around that core. Sponte makes the public CLI and package name explicit, centers the workspace model on `.sponte/`, supports multiple workspaces more directly, and treats task stores, guardrails, and workspace settings as Sponte-owned primitives. Internal Python modules still use `ralph_focus/` in places while that naming transition finishes.
+
+## Best Fit
+
+Sponte works best for software projects that already manage work as a backlog, want repeatable AI-assisted task execution, and benefit from isolated worktrees plus recovery after interrupted runs. It is strongest for ongoing engineering repos with recurring maintenance, implementation, or follow-up work, rather than one-off scripts or tiny projects with no durable task queue.
