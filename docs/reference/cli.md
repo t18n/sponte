@@ -32,12 +32,12 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 | --- | --- |
 | `status` | Short counts + suggested next commands |
 | `session-current` | Sessions with a non-empty `active_task_id` in job `status.json` |
-| `session-show SESSION_ID` | One session job row |
+| `session-show SESSION_ID` | Session job fields (key/value table) |
 | `task-list` | Files under `.sponte/tasks/backlog/` |
 | `task-priority` | `priorities.md` pending links + resolved `task_id` |
 | `task-current` | Tasks with non-empty `owning_session_id` |
-| `task-show TASK_ID` | One task job row |
-| `stats` | Machine-local analytics summary + recent JSONL events |
+| `task-show TASK_ID` | Task job fields (key/value table) |
+| `stats` | Machine-local analytics summary + recent JSONL events (tabular) |
 
 ## Worktrees
 
@@ -48,4 +48,10 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 ## Policy knobs (settings)
 
-`.sponte/settings.json` `policy` section includes `max_phase_rounds` (default 20). When an active task still has pending checklist items after that many counted agent phases, Sponte moves it to `review-required`, stops the loop for that task, and frees the claim so another session can pick it up via `task-resume`. `verification_required: false` skips the VERIFY phase.
+`.sponte/settings.json` `policy` section includes:
+
+- `max_phase_rounds` (default 20): when an active task still has pending checklist items after that many counted agent phases, Sponte moves it to `review-required`, stops the loop for that task, and frees the claim so another session can pick it up via `task-resume`.
+- `verification_required: false` skips the VERIFY phase.
+- `merge_required: false` skips merging the feature branch into the trunk on the primary checkout after wrap/priorities; you merge manually. The worktree is still torn down and the session completes the task from Sponte’s perspective; local branch deletion may use `git branch -D` when the branch was never merged.
+
+See [backpressure.md](../concepts/backpressure.md) and [config.md](config.md).

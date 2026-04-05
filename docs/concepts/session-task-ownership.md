@@ -1,0 +1,24 @@
+# Session and task ownership
+
+## Invariants
+
+- One **active** task has exactly one **owning** session and one active worktree.
+- One session owns **at most one** active task at a time.
+- One session may process **many** tasks sequentially over its lifetime.
+- A task may appear in **many** sessions historically; only **one** session may actively own it now.
+- **`.sponte` is the source of truth** for workspace task ownership. Machine-local app state is not authoritative for “who owns this task?”
+
+## `session-resume` vs `task-resume`
+
+- **`session-resume <session_id>`** continues the **same lane** on whatever that session was doing (same runner id, same resume file under app state).
+- **`task-resume <task_id>`** starts a **new** session id and **transfers** active ownership of that task into the new lane, using the existing worktree and saved phase when possible.
+
+Use `task-resume` when you want a fresh session id but the same interrupted or `review-required` task. Use `session-resume` when you want to pick up exactly where a known session left off.
+
+## Cancellation
+
+`task-cancel` is **destructive**: it clears locks and resume state for the owner, removes the worktree (even if dirty), and moves the task file from `in-progress` back to `backlog` when applicable so the task can be claimed again.
+
+## Cleanup
+
+`task-cleanup` is an **explicit repair** command. Normal commands should not silently fix unrelated stale state. Run it when you suspect orphan locks or job rows pointing at missing worktrees.

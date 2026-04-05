@@ -29,3 +29,9 @@ If machine-local resume data and repo-local job metadata disagree about ownershi
 ## Harnesses
 
 Built-in harnesses map to official CLIs. **Custom** harnesses are thin: executable plus fixed arguments; the prompt is passed as the final argument and the current model is exposed as `SPONTE_MODEL` in the subprocess environment. Validate selections during `sponte init`.
+
+## More reading
+
+- [Tasks and sessions](tasks-and-sessions.md), [ownership](session-task-ownership.md), [state model](state-model.md)
+- [Job folders](job-folders.md), [task states](task-states.md), [backpressure](backpressure.md)
+- [Guides: getting started](../guides/getting-started.md), [provider safety](../guides/provider-safety.md)

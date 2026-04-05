@@ -113,7 +113,7 @@ sponte worktree-prune-clean --workspace /absolute/path/to/workspace
 sponte worktree-remove --workspace /absolute/path/to/workspace
 ```
 
-More detail: [docs/index.md](docs/index.md).
+**Documentation:** [docs/index.md](docs/index.md) (concepts, guides, CLI and config reference).
 
 ## Workspace Model
 

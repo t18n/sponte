@@ -1,20 +1,40 @@
 # Sponte documentation
 
-Sponte is a **local orchestration CLI** for software workspaces: it manages markdown tasks, git worktrees, and calls **official agent harness CLIs** (Cursor, Claude, Codex, Droid, …) in headless mode. It does not replace your IDE, editor, or diff tools.
+Sponte is a **local orchestration CLI** for git workspaces: markdown tasks, worktrees, and **official harness CLIs** in headless mode. It does not replace your IDE, editor, or diff tools.
 
 ## Start here
 
-- [Concepts overview](concepts/overview.md) — tasks, sessions, worktrees, and where state lives
-- [CLI reference](reference/cli.md) — command list and short semantics
+- [Getting started](guides/getting-started.md)
+- [Concepts overview](concepts/overview.md)
+- [CLI reference](reference/cli.md)
+- [Configuration](reference/config.md)
 
-## Concepts (selected)
+## Concepts
 
-| Topic | File |
+| Topic | Description |
 | --- | --- |
-| Tasks vs sessions | [concepts/overview.md](concepts/overview.md) |
-| `.sponte/jobs/` layout | README “Workspace Model” + [reference/cli.md](reference/cli.md) |
-| Provider / billing caution | README “Provider usage” |
+| [Overview](concepts/overview.md) | Tasks, sessions, worktrees, source of truth |
+| [Tasks and sessions](concepts/tasks-and-sessions.md) | Lifecycle and `task_id` |
+| [Session vs task ownership](concepts/session-task-ownership.md) | Invariants, resume vs reclaim |
+| [State model](concepts/state-model.md) | `.sponte` vs app state |
+| [Job folders](concepts/job-folders.md) | `.sponte/jobs/` dual index |
+| [Task states](concepts/task-states.md) | Backlog → completed, `review-required` |
+| [Backpressure / policy](concepts/backpressure.md) | `max_phase_rounds`, verify, merge |
+| [Observability](concepts/observability.md) | `status`, `stats`, events |
+| [Positioning](concepts/positioning.md) | Orchestration layer, not an IDE |
 
-## Guides (placeholders for expansion)
+## Guides
 
-Future pages can cover custom harnesses, `review-required`, and `task-cleanup` in depth; the CLI help strings and README already describe current behavior.
+| Topic | Description |
+| --- | --- |
+| [Migrating from auto-focus](guides/migrating-from-auto-focus.md) | Renamed commands and paths |
+| [Custom harnesses](guides/custom-harnesses.md) | Headless custom executables |
+| [Overrides](guides/overrides.md) | Prompts, guardrails, precedence |
+| [Review required](guides/review-required.md) | After max phase rounds |
+| [Provider safety](guides/provider-safety.md) | Billing and policy caution |
+
+## Reference
+
+- [CLI](reference/cli.md)
+- [Config schema](reference/config.md)
+- [Task files & `task_id`](reference/task-files.md)
