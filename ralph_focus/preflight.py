@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Literal
 
 from rich.console import Console
@@ -11,7 +12,7 @@ from rich.table import Table
 
 from config.defaults import CODEX_EXECUTABLE, DROID_EXECUTABLE, REQUIRE_GH_AUTH
 from ralph_focus.git_ops import git_toplevel
-from ralph_focus.contracts import get_harness
+from ralph_focus.harness_resolve import resolve_harness
 
 PreflightStatus = Literal["ok", "fail", "skip"]
 
@@ -29,10 +30,14 @@ def _agent_executable_path(agent_id: str) -> str | None:
     return None
 
 
-def _collect_preflight_rows(*, agent: str) -> list[tuple[str, PreflightStatus, str]]:
+def _collect_preflight_rows(
+    *,
+    agent: str,
+    workspace_root: Path | None = None,
+) -> list[tuple[str, PreflightStatus, str]]:
     rows: list[tuple[str, PreflightStatus, str]] = []
 
-    primary = git_toplevel()
+    primary = git_toplevel() or workspace_root
     if primary is None:
         rows.append(
             (
@@ -51,7 +56,7 @@ def _collect_preflight_rows(*, agent: str) -> list[tuple[str, PreflightStatus, s
         rows.append(("git executable", "ok", git_bin))
 
     try:
-        harness = get_harness(agent)
+        harness = resolve_harness(primary, agent)
         label = f"Agent CLI ({harness.id})"
         availability = harness.availability()
         if not availability.available:
@@ -113,9 +118,15 @@ def _print_preflight_table(console: Console, rows: list[tuple[str, PreflightStat
     console.print(t)
 
 
-def run_preflight(*, agent: str, console: Console | None = None, verbose: bool = False) -> None:
+def run_preflight(
+    *,
+    agent: str,
+    console: Console | None = None,
+    verbose: bool = False,
+    workspace_root: Path | None = None,
+) -> None:
     c = console or Console(stderr=True)
-    rows = _collect_preflight_rows(agent=agent)
+    rows = _collect_preflight_rows(agent=agent, workspace_root=workspace_root)
     failed = [r for r in rows if r[1] == "fail"]
 
     if verbose:

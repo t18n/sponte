@@ -123,7 +123,7 @@ def init_sponte_workspace(
     """Create ``.sponte`` tree, ensure gitignore, optional task import, default settings."""
     sponte = repo_root / SPONTE_DIR
     sponte.mkdir(parents=True, exist_ok=True)
-    for stage in ("backlog", "in-progress", "completed"):
+    for stage in ("backlog", "in-progress", "review-required", "completed"):
         (repo_root / TASKS_DIR / stage).mkdir(parents=True, exist_ok=True)
     settings = load_workspace_settings(repo_root)
     settings_exists = workspace_settings_path(repo_root).is_file()

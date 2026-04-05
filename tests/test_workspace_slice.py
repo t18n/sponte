@@ -272,7 +272,7 @@ def test_init_cli_initializes_workspace_without_running_cycle(monkeypatch: pytes
     monkeypatch.setattr(cli.Confirm, "ask", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(cli, "run_one_cycle", lambda *_args, **_kwargs: seen.__setitem__("run_one_cycle", 1) or 0)
     monkeypatch.setattr(cli, "run_preflight", lambda **_k: (_ for _ in ()).throw(AssertionError("init should not preflight")))
-    monkeypatch.setattr(cli, "get_harness", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("init should not get harness")))
+    monkeypatch.setattr(cli, "resolve_harness", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("init should not get harness")))
 
     runner = CliRunner()
     result = runner.invoke(cli.app, ["init"], catch_exceptions=False)
@@ -307,7 +307,7 @@ def test_plan_cli_creates_task_for_initialized_workspace(
     monkeypatch.setattr(cli.Confirm, "ask", lambda *_args, **_kwargs: False)
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["plan", "--workspace", str(root)])
+    result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
 
     assert result.exit_code == 0
     created = root / TASKS_DIR / "backlog" / "cli-init-redesign.md"
@@ -360,7 +360,7 @@ def test_plan_cli_can_refine_existing_backlog_task(
     monkeypatch.setattr(cli.Confirm, "ask", lambda *_args, **_kwargs: next(confirms))
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["plan", "--workspace", str(root)])
+    result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
 
     assert result.exit_code == 0
     text = task_path.read_text(encoding="utf-8")
@@ -407,7 +407,7 @@ def test_plan_cli_can_refine_nested_backlog_task(
     monkeypatch.setattr(cli.Confirm, "ask", lambda *_args, **_kwargs: next(confirms))
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["plan", "--workspace", str(root)])
+    result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
 
     assert result.exit_code == 0
     text = task_path.read_text(encoding="utf-8")
@@ -428,7 +428,7 @@ def test_plan_cli_requires_initialized_workspace(
     monkeypatch.setattr(cli, "_cli_allows_prompts", lambda: False)
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["plan", "--workspace", str(root)])
+    result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
 
     assert result.exit_code != 0
     output = (result.stdout + result.stderr).lower()

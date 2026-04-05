@@ -33,7 +33,8 @@ from config.defaults import (
     SELECTION_LOCK_TIMEOUT_SEC,
     TASKS_DIR,
 )
-from ralph_focus.contracts import FailureContext, Harness, RunRequest, get_harness
+from ralph_focus.contracts import FailureContext, Harness, RunRequest
+from ralph_focus.harness_resolve import resolve_harness
 from ralph_focus.failure_detection import FailureKind, ProgressSnapshot
 from ralph_focus.phase_policy import PLANNER_PHASES, phase_model_for
 from ralph_focus.git_message import truncate_subject
@@ -104,6 +105,31 @@ from ralph_focus.tasks import (
 )
 
 ProgressMode = Literal["off", "on", "full"]
+
+_COUNTED_AGENT_PHASES = frozenset({
+    "PLAN",
+    "IMPLEMENT",
+    "IMPROVE_REVIEW",
+    "IMPROVE_EXECUTE",
+    "FOLLOWUP",
+    "WRAP",
+    "PRIORITIES",
+    "VERIFY",
+})
+
+
+@dataclass
+class _PhaseBudgetCtx:
+    wt_path: Path
+    rel_task: str
+    logf: Path
+    br_name: str
+    main_ref: str
+    plan_rel: str
+    implement_next: int
+    improve_i: int
+    improve_j: int
+    conflict_next: int
 
 
 def phase_uses_plan_model(phase: str) -> bool:
@@ -250,6 +276,10 @@ class AutoFocusConfig:
     resume_handoff: str = ""
     resume_handoff_pending: bool = False
     trunk_branch_override: str | None = None
+    max_phase_rounds: int = 20
+    verification_required: bool = True
+    merge_required: bool = True
+    phase_agent_rounds: int = 0
 
     def _run_agent(
         self,
@@ -399,6 +429,95 @@ def _sync_job_status_files(
     )
 
 
+def _finalize_review_required(
+    cfg: AutoFocusConfig,
+    *,
+    wt_path: Path,
+    rel_task: str,
+    logf: Path,
+    br_name: str,
+) -> int:
+    primary = cfg.primary
+    _append_phase_log(logf, "REVIEW_REQUIRED_MAX_PHASE_ROUNDS")
+    rel = concrete_task_rel(wt_path, rel_task)
+    new_rel = rel_task
+    if task_stage(rel) == "in-progress":
+        name = Path(rel).name
+        dest = task_with_stage(rel, "review-required")
+        (wt_path / dest).parent.mkdir(parents=True, exist_ok=True)
+        rc, _, err = git(wt_path, "mv", rel, dest)
+        if rc != 0:
+            _append_diagnostic_log(logf, "REVIEW_REQUIRED: git mv failed", err or "")
+            return 1
+        msg = truncate_subject(f"review-required {name}", prefix="chore(tasks): ", max_total=50)
+        git(
+            wt_path,
+            "-c",
+            f"user.name={GIT_IDENTITY_NAME}",
+            "-c",
+            f"user.email={GIT_IDENTITY_EMAIL}",
+            "commit",
+            "-m",
+            msg,
+        )
+        new_rel = dest
+    title = ""
+    tp = wt_path / new_rel
+    if tp.is_file():
+        title = task_label(tp)
+    write_task_job_status(
+        primary,
+        TaskJobStatus(
+            task_id=cfg.task_id,
+            rel_task=new_rel,
+            stage="review-required",
+            owning_session_id="",
+            worktree_path=str(wt_path),
+            branch=br_name,
+            task_title=title,
+        ),
+    )
+    write_session_job_status(
+        primary,
+        SessionJobStatus(
+            session_id=cfg.runner_id,
+            workspace_root=str(primary.resolve()),
+            active_task_id="",
+            rel_task=new_rel,
+            phase="REVIEW_REQUIRED",
+            worktree_path=str(wt_path),
+            branch=br_name,
+        ),
+    )
+    clear_resume(primary, runner_id=cfg.runner_id)
+    _release_task_lock(cfg)
+    cfg.current_wt_path = None
+    return 4
+
+
+def _maybe_stop_for_phase_budget(
+    cfg: AutoFocusConfig,
+    *,
+    phase: str,
+    ctx: _PhaseBudgetCtx,
+) -> int | None:
+    if phase not in _COUNTED_AGENT_PHASES:
+        return None
+    limit = max(1, cfg.max_phase_rounds)
+    if cfg.phase_agent_rounds < limit:
+        return None
+    tp = ctx.wt_path / ctx.rel_task
+    if not tp.is_file() or not task_has_pending(tp):
+        return None
+    return _finalize_review_required(
+        cfg,
+        wt_path=ctx.wt_path,
+        rel_task=ctx.rel_task,
+        logf=ctx.logf,
+        br_name=ctx.br_name,
+    )
+
+
 def _log_tail(logf: Path, *, lines: int = 80) -> str:
     if not logf.is_file():
         return ""
@@ -427,9 +546,14 @@ def _run_phase_agent(
     plan_rel: str,
     logf: Path,
     label: str,
+    phase_budget: _PhaseBudgetCtx | None = None,
 ) -> int:
     cfg.last_failure_kind = None
     cfg.last_failure_detail = ""
+    if phase_budget is not None:
+        early = _maybe_stop_for_phase_budget(cfg, phase=phase, ctx=phase_budget)
+        if early is not None:
+            return early
     before = _progress_snapshot(wt_path, rel_task)
     model = phase_model_for(phase, plan_model=cfg.plan_model, execute_model=cfg.execute_model)
     rc = cfg._run_agent(wt_path, model, cfg._sub(prompt_name, rel_task, plan_rel), logf, label)
@@ -482,6 +606,8 @@ def _run_phase_agent(
             )
             return 1
 
+    if phase in _COUNTED_AGENT_PHASES:
+        cfg.phase_agent_rounds += 1
     token_state = cfg.token_state(logf)
     if token_state == "rotate":
         _append_diagnostic_log(
@@ -554,7 +680,7 @@ def run_one_cycle(
     stop_after_plan: bool = False,
 ) -> int:
     """
-    Returns 0 success, 1 error, 2 no actionable task, 3 rotate session.
+    Returns 0 success, 1 error, 2 no actionable task, 3 rotate session, 4 unused (internal).
     Mutates cfg.task_arg consumed after successful cycle by caller.
     """
     primary = cfg.primary
@@ -615,7 +741,7 @@ def run_one_cycle(
         cfg.plan_model = st.plan_model or cfg.plan_model
         cfg.execute_model = st.agent_model or cfg.execute_model
         if st.agent_kind:
-            cfg.harness = get_harness(st.agent_kind)
+            cfg.harness = resolve_harness(primary, st.agent_kind)
         cfg.allow_agent_pick = st.allow_agent_pick.lower() == "true"
         cfg.task_arg = st.task_arg
         cfg.cycles_done_entry = st.cycles_done
@@ -726,6 +852,22 @@ def run_one_cycle(
             conflict_next,
         )
 
+    cfg.phase_agent_rounds = 0
+
+    def _pb() -> _PhaseBudgetCtx:
+        return _PhaseBudgetCtx(
+            wt_path,
+            rel_task,
+            logf,
+            br_name,
+            main_ref,
+            plan_rel,
+            implement_next,
+            improve_i,
+            improve_j,
+            conflict_next,
+        )
+
     # PLAN
     if phase == "PLAN":
         _append_phase_log(logf, "PLAN")
@@ -738,7 +880,10 @@ def run_one_cycle(
             plan_rel=plan_rel,
             logf=logf,
             label="PLAN",
+            phase_budget=_pb(),
         )
+        if rc == 4:
+            return 0
         if rc == 1:
             if stop_after_plan:
                 _release_task_lock(cfg)
@@ -772,7 +917,10 @@ def run_one_cycle(
                 plan_rel=plan_rel,
                 logf=logf,
                 label=f"IMPLEMENT_{n}",
+                phase_budget=_pb(),
             )
+            if rc == 4:
+                return 0
             if rc == 1:
                 return rc
             implement_next = n + 1
@@ -802,7 +950,10 @@ def run_one_cycle(
                     plan_rel=plan_rel,
                     logf=logf,
                     label=f"IMPROVE_{i}",
+                    phase_budget=_pb(),
                 )
+                if rc == 4:
+                    return 0
                 if rc == 1:
                     return rc
                 j = 1
@@ -821,7 +972,10 @@ def run_one_cycle(
                     plan_rel=plan_rel,
                     logf=logf,
                     label=f"IMPROVE_{i}_IMPLEMENT_{j}",
+                    phase_budget=_pb(),
                 )
+                if rc == 4:
+                    return 0
                 if rc == 1:
                     return rc
                 j += 1
@@ -847,7 +1001,10 @@ def run_one_cycle(
             plan_rel=plan_rel,
             logf=logf,
             label="FOLLOWUP_TICKETS",
+            phase_budget=_pb(),
         )
+        if rc == 4:
+            return 0
         if rc == 1:
             return rc
         phase = "WRAP"
@@ -866,7 +1023,10 @@ def run_one_cycle(
             plan_rel=plan_rel,
             logf=logf,
             label="WRAP_COMMIT",
+            phase_budget=_pb(),
         )
+        if rc == 4:
+            return 0
         if rc == 1:
             return rc
         _auto_finalize_task_branch(primary, wt_path, rel_task)
@@ -886,12 +1046,19 @@ def run_one_cycle(
             plan_rel=plan_rel,
             logf=logf,
             label="PRIORITIES",
+            phase_budget=_pb(),
         )
+        if rc == 4:
+            return 0
         if rc == 1:
             return rc
         if not _commit_worktree_pending_if_dirty(wt_path, logf, "priorities after agent"):
             return 1
-        phase = "VERIFY"
+        if cfg.verification_required:
+            phase = "VERIFY"
+        else:
+            _append_phase_log(logf, "VERIFY_SKIPPED_POLICY")
+            phase = "MERGE"
         _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
         if rc == 3:
             return 3
@@ -907,7 +1074,10 @@ def run_one_cycle(
             plan_rel=plan_rel,
             logf=logf,
             label="VERIFY",
+            phase_budget=_pb(),
         )
+        if rc == 4:
+            return 0
         if rc == 1:
             return rc
         if not _commit_worktree_pending_if_dirty(wt_path, logf, "verify before merge"):

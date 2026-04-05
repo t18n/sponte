@@ -10,7 +10,7 @@ from pathlib import Path
 from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
 
 _LEGACY_TASKS_PREFIX = ".tasks/"
-_TASK_STAGES = ("backlog", "in-progress", "completed")
+_TASK_STAGES = ("backlog", "in-progress", "review-required", "completed")
 
 _PENDING = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[[\s]\]", re.MULTILINE)
 _DONE = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[x\]", re.MULTILINE)

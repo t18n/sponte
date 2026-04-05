@@ -38,10 +38,10 @@ def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         cli,
         "get_strategy",
-        lambda _name: (_ for _ in ()).throw(AssertionError("cli should use get_harness")),
+        lambda _p, _name: (_ for _ in ()).throw(AssertionError("cli should use resolve_harness")),
         raising=False,
     )
-    monkeypatch.setattr(cli, "get_harness", lambda name: harness, raising=False)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: harness, raising=False)
 
     def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
         seen["cfg"] = cfg
@@ -76,7 +76,7 @@ def test_auto_focus_requires_explicit_task_or_resume(monkeypatch, tmp_path: Path
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should stop before preflight")))
-    monkeypatch.setattr(cli, "get_harness", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should stop before harness lookup")))
+    monkeypatch.setattr(cli, "resolve_harness", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should stop before harness lookup")))
 
     runner = CliRunner()
     result = runner.invoke(cli.app, ["agent", "--once"])
@@ -124,10 +124,10 @@ def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_confi
     monkeypatch.setattr(cli, "load_resume", lambda _primary, runner_id: resume_state)
     monkeypatch.setattr(
         cli,
-        "run_preflight",
-        lambda *, agent, console, verbose: seen.setdefault("preflight_agent", agent),
-    )
-    monkeypatch.setattr(cli, "get_harness", lambda name: _Harness(name), raising=False)
+            "run_preflight",
+            lambda *, agent, console, verbose, workspace_root=None: seen.setdefault("preflight_agent", agent),
+        )
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: _Harness(name), raising=False)
 
     def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
         seen["cfg_harness_id"] = cfg.harness.id
@@ -198,7 +198,7 @@ def test_auto_focus_resume_prints_restored_task_pick_settings(monkeypatch, tmp_p
     monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "load_resume", lambda _primary, runner_id: resume_state)
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
-    monkeypatch.setattr(cli, "get_harness", lambda name: _Harness(name), raising=False)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: _Harness(name), raising=False)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
@@ -270,7 +270,7 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
     monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
-    monkeypatch.setattr(cli, "get_harness", lambda _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
 
     def fake_run_one_cycle(_cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
         cycles.append(use_resume)
@@ -345,7 +345,7 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
     monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
-    monkeypatch.setattr(cli, "get_harness", lambda _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
 
     def fake_run_one_cycle(_cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
         seen.append(use_resume)
@@ -418,7 +418,7 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
     monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
-    monkeypatch.setattr(cli, "get_harness", lambda _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
 
     def fake_run_one_cycle(_cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
         seen.append(use_resume)

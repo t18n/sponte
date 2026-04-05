@@ -29,7 +29,7 @@ from config.defaults import (
     ROTATE_WARN_THRESHOLD_TOKENS,
 )
 from config.defaults import TASKS_DIR
-from ralph_focus.contracts import get_harness
+from ralph_focus.harness_resolve import resolve_harness
 from ralph_focus.cycle import AutoFocusConfig, ProgressMode, run_one_cycle
 from ralph_focus.failure_detection import FailureKind
 from ralph_focus.interactive_setup import resolve_choice_index
@@ -58,6 +58,7 @@ from ralph_focus.workspace_resolve import (
     resolve_primary_workspace,
 )
 from ralph_focus.workspace_init import refresh_priorities_from_backlog
+from ralph_focus.workspace_settings import load_workspace_settings, workspace_settings_path
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
 app = typer.Typer(help="Sponte — standalone task harness powered by Ralph core.", no_args_is_help=True)
@@ -416,11 +417,20 @@ def cmd_agent(
     ] = None,
     task: Annotated[str | None, typer.Argument(help="Optional .sponte/tasks/… path")] = None,
     agent: Annotated[
-        str,
-        typer.Option("--agent", help="cursor | claude | codex | droid | oz | warp | amp"),
-    ] = DEFAULT_AGENT,
-    plan_model: Annotated[str, typer.Option("--plan-model", help="Model for plan phase")] = DEFAULT_PLAN_MODEL,
-    execute_model: Annotated[str, typer.Option("--execute-model", help="Model for implement phases")] = DEFAULT_EXECUTE_MODEL,
+        str | None,
+        typer.Option(
+            "--agent",
+            help="cursor | claude | codex | droid | oz | warp | amp | custom (default: .sponte/settings.json)",
+        ),
+    ] = None,
+    plan_model: Annotated[
+        str | None,
+        typer.Option("--plan-model", help="Plan phase model (default: .sponte/settings.json)"),
+    ] = None,
+    execute_model: Annotated[
+        str | None,
+        typer.Option("--execute-model", help="Implement phase model (default: .sponte/settings.json)"),
+    ] = None,
     rotate_threshold_tokens: Annotated[
         int | None,
         typer.Option("--rotate-threshold-tokens", help="Rotate to fresh context at this token total (default: env/config)"),
@@ -549,6 +559,8 @@ def cmd_agent(
             interactive=False,
         )
 
+    ws = load_workspace_settings(primary)
+
     loaded_resume_state: ResumeState | None = None
     if cwt_arg:
         wt_resolved = Path(cwt_arg).expanduser().resolve()
@@ -595,22 +607,30 @@ def cmd_agent(
         raise typer.Exit(1)
 
     if loaded_resume_state is not None:
-        effective_agent = loaded_resume_state.agent_kind or agent
-        effective_plan_model = loaded_resume_state.plan_model or plan_model
-        effective_execute_model = loaded_resume_state.agent_model or execute_model
+        ak = (loaded_resume_state.agent_kind or "").strip()
+        effective_agent = ak or (agent if agent is not None else ws.resolved_harness_id())
+        pm_saved = (loaded_resume_state.plan_model or "").strip()
+        effective_plan_model = pm_saved or (plan_model if plan_model is not None else ws.resolved_plan_model())
+        am_saved = (loaded_resume_state.agent_model or "").strip()
+        effective_execute_model = am_saved or (execute_model if execute_model is not None else ws.resolved_execute_model())
         effective_allow_agent_pick = loaded_resume_state.allow_agent_pick.lower() == "true"
         effective_task_arg = loaded_resume_state.task_arg
     else:
-        effective_agent = agent
-        effective_plan_model = plan_model
-        effective_execute_model = execute_model
+        effective_agent = agent if agent is not None else ws.resolved_harness_id()
+        effective_plan_model = plan_model if plan_model is not None else ws.resolved_plan_model()
+        effective_execute_model = execute_model if execute_model is not None else ws.resolved_execute_model()
         effective_allow_agent_pick = allow_agent_pick_effective
         effective_task_arg = task or ""
 
     if not skip_preflight:
-        run_preflight(agent=effective_agent, console=console, verbose=pm != "off")
+        run_preflight(
+            agent=effective_agent,
+            console=console,
+            verbose=pm != "off",
+            workspace_root=primary,
+        )
 
-    harness = get_harness(effective_agent)
+    harness = resolve_harness(primary, effective_agent)
 
     complete_worktree_mode = bool(cwt_arg)
 
@@ -641,6 +661,9 @@ def cmd_agent(
         task_arg=effective_task_arg,
         runner_id=runner_id_effective,
         trunk_branch_override=trunk_branch,
+        max_phase_rounds=ws.policy.max_phase_rounds,
+        verification_required=ws.policy.verification_required,
+        merge_required=ws.policy.merge_required,
         rotate_policy=rotation_policy_from_overrides(
             rotate_threshold=rotate_threshold_tokens,
             warn_threshold=warn_threshold_tokens,
@@ -915,6 +938,48 @@ def cmd_remove(
         interactive=_cli_allows_prompts(),
     )
     raise typer.Exit(worktree_remove_interactive(ws, console=console))
+
+
+config_typer = typer.Typer(help="Inspect workspace configuration.", no_args_is_help=True)
+
+
+@config_typer.command("show", help="Print effective values from .sponte/settings.json.")
+def cmd_config_show(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+) -> None:
+    primary = resolve_git_repo_root(
+        workspace,
+        console=console,
+        interactive=False,
+    )
+    primary = resolve_primary_workspace(
+        primary,
+        console=console,
+        interactive=False,
+    )
+    path = workspace_settings_path(primary)
+    ws = load_workspace_settings(primary)
+    t = Table(title="Workspace settings (resolved)")
+    t.add_column("Key")
+    t.add_column("Value")
+    t.add_row("File", str(path) if path.is_file() else f"{path} (missing)")
+    t.add_row("trunk_branch", ws.normalized_trunk())
+    t.add_row("worktree_root", ws.normalized_worktree_root())
+    t.add_row("harness", ws.resolved_harness_id())
+    t.add_row("plan_model", ws.resolved_plan_model())
+    t.add_row("execute_model", ws.resolved_execute_model())
+    t.add_row("policy.max_phase_rounds", str(ws.policy.max_phase_rounds))
+    t.add_row("policy.verification_required", str(ws.policy.verification_required))
+    t.add_row("policy.merge_required", str(ws.policy.merge_required))
+    if ws.custom_harness and ws.custom_harness.executable.strip():
+        t.add_row("custom_harness.executable", ws.custom_harness.executable)
+    console.print(Panel(t, border_style="cyan"))
+
+
+app.add_typer(config_typer, name="config")
 
 
 @app.command("task-plan", help="Turn backlog notes into `.sponte/tasks/` markdown files interactively.")

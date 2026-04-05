@@ -16,13 +16,7 @@ def test_collect_preflight_rows_uses_harness_availability(monkeypatch, tmp_path:
     monkeypatch.setattr(preflight, "git_toplevel", lambda: tmp_path)
     monkeypatch.setattr(preflight, "_agent_executable_path", lambda _agent_id: "/bin/cursor-agent")
     monkeypatch.setattr(preflight.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(
-        preflight,
-        "get_strategy",
-        lambda _name: (_ for _ in ()).throw(AssertionError("preflight should use get_harness")),
-        raising=False,
-    )
-    monkeypatch.setattr(preflight, "get_harness", lambda name: _Harness(), raising=False)
+    monkeypatch.setattr(preflight, "resolve_harness", lambda _p, name: _Harness(), raising=False)
 
     rows = preflight._collect_preflight_rows(agent="cursor")
 
@@ -46,7 +40,7 @@ def test_collect_preflight_rows_treats_unavailable_harness_without_problems_as_f
     monkeypatch.setattr(preflight, "git_toplevel", lambda: tmp_path)
     monkeypatch.setattr(preflight, "_agent_executable_path", lambda _agent_id: "/bin/cursor-agent")
     monkeypatch.setattr(preflight.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(preflight, "get_harness", lambda name: _Harness(), raising=False)
+    monkeypatch.setattr(preflight, "resolve_harness", lambda _p, name: _Harness(), raising=False)
 
     rows = preflight._collect_preflight_rows(agent="cursor")
 

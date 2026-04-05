@@ -19,7 +19,7 @@ from ralph_focus.strategies import AgentStrategy, get_strategy
 from ralph_focus.tasks import normalize_task_path, priorities_file, priority_task_paths_pending, task_has_pending, task_snapshot
 
 _STREAM_JSON_STRATEGY_IDS = frozenset({"cursor", "droid"})
-_KNOWN_NON_STREAM_JSON_STRATEGY_IDS = frozenset({"claude", "codex", "amp", "oz", "warp"})
+_KNOWN_NON_STREAM_JSON_STRATEGY_IDS = frozenset({"claude", "codex", "amp", "oz", "warp", "custom"})
 
 
 @dataclass(frozen=True)

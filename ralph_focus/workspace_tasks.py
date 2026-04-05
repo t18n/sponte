@@ -19,9 +19,12 @@ def sponte_tasks_layout_valid(root: Path) -> bool:
         return False
     backlog = td / "backlog"
     in_progress = td / "in-progress"
+    review = td / "review-required"
     completed = td / "completed"
     if not backlog.is_dir() or not in_progress.is_dir() or not completed.is_dir():
         return False
+    if not review.is_dir():
+        review.mkdir(parents=True, exist_ok=True)
     pri = priorities_file(root)
     if pri.is_file():
         return True

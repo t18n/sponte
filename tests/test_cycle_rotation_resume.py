@@ -225,10 +225,10 @@ def test_resume_restores_harness_from_saved_agent_kind(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         cycle,
         "get_strategy",
-        lambda _name: (_ for _ in ()).throw(AssertionError("resume should use get_harness")),
+        lambda _p, _name: (_ for _ in ()).throw(AssertionError("resume should use resolve_harness")),
         raising=False,
     )
-    monkeypatch.setattr(cycle, "get_harness", lambda name: _DummyHarness(name), raising=False)
+    monkeypatch.setattr(cycle, "resolve_harness", lambda _p, name: _DummyHarness(name), raising=False)
 
     def fake_run_phase_agent(_cfg, *_args, **_kwargs) -> int:
         observed["harness_id"] = _cfg.harness.id
