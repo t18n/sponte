@@ -58,7 +58,12 @@ from ralph_focus.workspace_resolve import (
     resolve_primary_workspace,
 )
 from ralph_focus.workspace_init import refresh_priorities_from_backlog
-from ralph_focus.task_jobs import read_session_job_status, read_task_job_status
+from ralph_focus.task_jobs import (
+    read_session_job_status,
+    read_task_job_status,
+    SessionJobStatus,
+    TaskJobStatus,
+)
 from ralph_focus.task_lifecycle import (
     cancel_all_active_tasks,
     cancel_task,
@@ -75,7 +80,12 @@ from ralph_focus.tasks import (
     priorities_file,
     task_label,
 )
-from ralph_focus.workspace_analytics import load_summary, read_recent_events, bump_summary
+from ralph_focus.workspace_analytics import (
+    bump_summary,
+    emit_lifecycle_event,
+    load_summary,
+    read_recent_events,
+)
 from ralph_focus.workspace_settings import load_workspace_settings, workspace_settings_path
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
@@ -86,6 +96,48 @@ console = Console(stderr=True)
 def _new_rap_id() -> str:
     """Opaque session id (one per ``sponte agent`` invocation)."""
     return f"rap-{secrets.token_hex(4)}"
+
+
+def _print_kv_panel(title: str, rows: list[tuple[str, str]], *, border_style: str = "cyan") -> None:
+    t = Table(title=title, show_header=False, pad_edge=False)
+    t.add_column("Field", style="dim", no_wrap=True)
+    t.add_column("Value")
+    for k, v in rows:
+        disp = str(v).strip()
+        t.add_row(k, disp if disp else "—")
+    console.print(Panel(t, border_style=border_style))
+
+
+def _print_session_job_detail(session_id: str, st: SessionJobStatus) -> None:
+    _print_kv_panel(
+        f"Session {session_id}",
+        [
+            ("session_id", st.session_id or session_id),
+            ("workspace_root", st.workspace_root),
+            ("active_task_id", st.active_task_id),
+            ("rel_task", st.rel_task),
+            ("phase", st.phase),
+            ("worktree_path", st.worktree_path),
+            ("branch", st.branch),
+            ("updated_at", st.updated_at),
+        ],
+    )
+
+
+def _print_task_job_detail(task_id: str, st: TaskJobStatus) -> None:
+    _print_kv_panel(
+        f"Task {task_id}",
+        [
+            ("task_id", st.task_id or task_id),
+            ("task_title", st.task_title),
+            ("rel_task", st.rel_task),
+            ("stage", st.stage),
+            ("owning_session_id", st.owning_session_id),
+            ("worktree_path", st.worktree_path),
+            ("branch", st.branch),
+            ("updated_at", st.updated_at),
+        ],
+    )
 
 
 def _effective_runner_id(runner_id_opt: str | None) -> str:
@@ -722,6 +774,26 @@ def cmd_agent(
             bump_summary(primary, sessions_resumed=1)
     except OSError:
         pass
+    if resume_id is None:
+        emit_lifecycle_event(
+            primary,
+            event="session_started",
+            outcome="ok",
+            session_id=runner_id_effective,
+            harness=ws.resolved_harness_id(),
+            plan_model=ws.resolved_plan_model(),
+            execute_model=ws.resolved_execute_model(),
+        )
+    else:
+        emit_lifecycle_event(
+            primary,
+            event="session_resumed",
+            outcome="ok",
+            session_id=runner_id_effective,
+            harness=ws.resolved_harness_id(),
+            plan_model=ws.resolved_plan_model(),
+            execute_model=ws.resolved_execute_model(),
+        )
 
     def on_signal(_sig: int, _frame: object | None) -> None:
         if cleanup_on_exit and cfg.current_wt_path and cfg.current_wt_path.is_dir():
@@ -1109,7 +1181,7 @@ def cmd_session_show(
     if st is None:
         console.print("[red]No session job status for that id.[/red]")
         raise typer.Exit(1)
-    console.print(Panel(str(st), title=f"session {session_id}", border_style="cyan"))
+    _print_session_job_detail(session_id, st)
 
 
 @app.command("task-list", help="List backlog task files under .sponte/tasks/backlog/.")
@@ -1184,7 +1256,7 @@ def cmd_task_show(
     if st is None:
         console.print("[red]No task job status for that id.[/red]")
         raise typer.Exit(1)
-    console.print(Panel(str(st), title=f"task {task_id}", border_style="cyan"))
+    _print_task_job_detail(task_id, st)
 
 
 @app.command("stats", help="Workspace analytics counters and recent events (app state).")
@@ -1209,9 +1281,21 @@ def cmd_stats(
     console.print(Panel(t, border_style="green"))
     ev = read_recent_events(primary, limit=12)
     if ev:
-        console.print("[bold]Recent events[/bold]")
+        et = Table(title="Recent events (newest last)")
+        et.add_column("time", style="dim")
+        et.add_column("event")
+        et.add_column("outcome")
+        et.add_column("session")
+        et.add_column("task")
         for row in ev:
-            console.print(f"  {row}")
+            et.add_row(
+                str(row.get("timestamp", ""))[:19],
+                str(row.get("event", "")),
+                str(row.get("outcome", "")),
+                str(row.get("session_id", ""))[:16],
+                str(row.get("task_id", ""))[:24],
+            )
+        console.print(et)
 
 
 @app.command(

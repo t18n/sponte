@@ -87,6 +87,40 @@ def save_summary(workspace_root: Path, summary: AnalyticsSummary) -> None:
     p.write_text(json.dumps(summary.to_json(), indent=2) + "\n", encoding="utf-8")
 
 
+def emit_lifecycle_event(
+    workspace_root: Path,
+    *,
+    event: str,
+    outcome: str,
+    session_id: str = "",
+    task_id: str = "",
+    duration_sec: float = 0.0,
+    cycles: int = 0,
+    harness: str = "",
+    plan_model: str = "",
+    execute_model: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Best-effort JSONL append; never raises for analytics I/O failures."""
+    payload: dict[str, Any] = {
+        "event": event,
+        "outcome": outcome,
+        "session_id": session_id,
+        "task_id": task_id,
+        "duration_sec": duration_sec,
+        "cycles": cycles,
+        "harness": harness,
+        "plan_model": plan_model,
+        "execute_model": execute_model,
+    }
+    if metadata:
+        payload["metadata"] = metadata
+    try:
+        append_event(workspace_root, payload)
+    except OSError:
+        return
+
+
 def append_event(workspace_root: Path, event: dict[str, Any]) -> None:
     p = analytics_events_path(workspace_root)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +194,7 @@ __all__ = [
     "AnalyticsEvent",
     "AnalyticsSummary",
     "append_event",
+    "emit_lifecycle_event",
     "analytics_dir",
     "bump_summary",
     "load_summary",

@@ -25,6 +25,7 @@ class TaskJobStatus:
     worktree_path: str = ""
     branch: str = ""
     task_title: str = ""
+    updated_at: str = ""
 
     def to_json_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -42,6 +43,7 @@ class SessionJobStatus:
     phase: str = ""
     worktree_path: str = ""
     branch: str = ""
+    updated_at: str = ""
 
     def to_json_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -79,6 +81,7 @@ def read_task_job_status(repo: Path, task_id: str) -> TaskJobStatus | None:
             worktree_path=str(raw.get("worktree_path", "")),
             branch=str(raw.get("branch", "")),
             task_title=str(raw.get("task_title", "")),
+            updated_at=str(raw.get("updated_at", "")),
         )
     except (TypeError, ValueError):
         return None
@@ -109,6 +112,7 @@ def read_session_job_status(repo: Path, session_id: str) -> SessionJobStatus | N
             phase=str(raw.get("phase", "")),
             worktree_path=str(raw.get("worktree_path", "")),
             branch=str(raw.get("branch", "")),
+            updated_at=str(raw.get("updated_at", "")),
         )
     except (TypeError, ValueError):
         return None

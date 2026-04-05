@@ -27,7 +27,7 @@ from ralph_focus.task_jobs import (
     write_task_job_status,
 )
 from ralph_focus.tasks import concrete_task_rel, task_stage, task_with_stage
-from ralph_focus.workspace_analytics import bump_summary
+from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
 
 
@@ -98,6 +98,13 @@ def cancel_task(repo: Path, task_id: str) -> tuple[bool, str]:
         bump_summary(repo, tasks_cancelled=1)
     except OSError:
         pass
+    emit_lifecycle_event(
+        repo,
+        event="task_cancelled",
+        outcome="ok",
+        session_id=sess,
+        task_id=task_id,
+    )
     return True, "cancelled"
 
 
@@ -181,6 +188,12 @@ def task_cleanup(repo: Path) -> tuple[int, list[str]]:
             bump_summary(repo, cleanup_repairs=repairs)
         except OSError:
             pass
+        emit_lifecycle_event(
+            repo,
+            event="task_cleanup",
+            outcome="repaired",
+            metadata={"repairs": repairs, "notes": notes},
+        )
     return repairs, notes
 
 
@@ -277,6 +290,14 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
             worktree_path=str(wt),
             branch=br_name,
         ),
+    )
+    emit_lifecycle_event(
+        repo,
+        event="task_ownership_transferred",
+        outcome="ok",
+        session_id=new_rid,
+        task_id=task_id,
+        metadata={"from_session_id": old_sess} if old_sess else {},
     )
     return new_rid, ""
 

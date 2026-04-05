@@ -90,7 +90,7 @@ from ralph_focus.task_jobs import (
     write_task_job_status,
 )
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
-from ralph_focus.workspace_analytics import bump_summary
+from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.tasks import (
     compute_task_id,
     concrete_task_rel,
@@ -497,6 +497,16 @@ def _finalize_review_required(
         bump_summary(primary, tasks_review_required=1)
     except OSError:
         pass
+    emit_lifecycle_event(
+        primary,
+        event="task_review_required",
+        outcome="max_phase_rounds",
+        session_id=cfg.runner_id,
+        task_id=cfg.task_id,
+        harness=cfg.harness.id,
+        plan_model=cfg.plan_model,
+        execute_model=cfg.execute_model,
+    )
     return 4
 
 
@@ -1258,7 +1268,23 @@ def run_one_cycle(
 
                 _append_phase_log(logf, f"MERGE_TO_{main_ref}")
                 feature_already_merged = is_branch_merged_into(primary, br_name, main_ref)
-                if feature_already_merged:
+                if not cfg.merge_required:
+                    _append_phase_log(logf, "MERGE_SKIPPED_POLICY")
+                    if cfg.progress != "off":
+                        msg = (
+                            f"feature branch already merged into {main_ref}"
+                            if feature_already_merged
+                            else (
+                                f"merge into {main_ref} skipped (policy.merge_required=false); "
+                                "feature branch left unmerged on disk until you merge manually"
+                            )
+                        )
+                        step_done(
+                            "merge",
+                            msg,
+                            token_total=cfg.stats.rotation_tokens(),
+                        )
+                elif feature_already_merged:
                     if cfg.progress != "off":
                         step_done(
                             "merge",
@@ -1307,7 +1333,17 @@ def run_one_cycle(
                 rc_rm, _, _ = git(primary, "worktree", "remove", str(wt_path))
                 if rc_rm != 0 or wt_path.exists():
                     git(primary, "worktree", "remove", "-f", str(wt_path))
-                git(primary, "branch", "-d", br_name)
+                rc_branch, _, br_err = git(primary, "branch", "-d", br_name)
+                if rc_branch != 0:
+                    if not cfg.merge_required:
+                        git(primary, "branch", "-D", br_name)
+                    else:
+                        _append_diagnostic_log(
+                            logf,
+                            "git branch -d failed after merge",
+                            br_err or "",
+                        )
+                        return 1
                 clear_resume(
                     primary,
                     runner_id=cfg.runner_id,
@@ -1320,6 +1356,17 @@ def run_one_cycle(
                     bump_summary(primary, tasks_completed=1)
                 except OSError:
                     pass
+                emit_lifecycle_event(
+                    primary,
+                    event="task_completed",
+                    outcome="ok",
+                    session_id=cfg.runner_id,
+                    task_id=cfg.task_id,
+                    harness=cfg.harness.id,
+                    plan_model=cfg.plan_model,
+                    execute_model=cfg.execute_model,
+                    metadata={"merge_into_trunk": cfg.merge_required},
+                )
                 return 0
         except LockWaitTimeoutError as e:
             _append_diagnostic_log(
