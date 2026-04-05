@@ -22,7 +22,7 @@ from ralph_focus.workspace_settings import (
     save_workspace_settings,
 )
 from ralph_focus.interactive_setup import resolve_choice_index
-from ralph_focus.workspace_init import init_sponte_workspace
+from ralph_focus.workspace_init import ensure_gitignore_sponte, init_sponte_workspace
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 from ralph_focus.workspaces_registry import load_known_workspaces, register_workspace
 
@@ -256,6 +256,10 @@ def bootstrap_workspace_with_prompt(
             "[red]`sponte init` requires an interactive terminal (stdin must be a TTY).[/red]"
         )
         raise typer.Exit(1)
+    ensure_gitignore_sponte(
+        primary,
+        load_workspace_settings(primary).normalized_worktree_root(),
+    )
     source: Path | None = None
     if Confirm.ask("Migrate tasks from an existing markdown file or folder?", default=False):
         src_raw = Prompt.ask("Source path (file or folder of `.md` tasks)")

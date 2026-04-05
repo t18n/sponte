@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from config.defaults import LEGACY_RALPH_DATA_DIR, SPONTE_GUARDRAILS_PATH, SPONTE_PROGRESS_PATH, WORKTREE_BASE_DIR
+from config.defaults import (
+    LEGACY_RALPH_DATA_DIR,
+    SPONTE_DIR,
+    SPONTE_GUARDRAILS_PATH,
+    SPONTE_PROGRESS_PATH,
+    WORKTREE_BASE_DIR,
+)
 from ralph_focus.git_ops import git
 from ralph_focus.paths import worktrees_base
 
@@ -34,16 +40,20 @@ def _porcelain_path(line: str) -> str:
 
 
 def _ignored_for_merge_precheck(path_part: str, *, worktree_root: str | None = None) -> bool:
-    ignored_prefixes = (
+    sponte_slash = f"{SPONTE_DIR.rstrip('/')}/"
+    prefixes: tuple[str, ...] = (
         f"{LEGACY_RALPH_DATA_DIR}/",
         ".ralph/",
+        sponte_slash,
     )
-    dynamic_prefixes = (f"{(worktree_root or WORKTREE_BASE_DIR).rstrip('/')}/",)
+    wt = (worktree_root or WORKTREE_BASE_DIR).strip().rstrip("/")
+    if wt and wt != SPONTE_DIR.rstrip("/") and not wt.startswith(f"{SPONTE_DIR.rstrip('/')}/"):
+        prefixes = prefixes + (f"{wt}/",)
     ignored_exact = {
         SPONTE_GUARDRAILS_PATH,
         SPONTE_PROGRESS_PATH,
     }
-    return path_part.startswith(ignored_prefixes + dynamic_prefixes) or path_part in ignored_exact
+    return path_part.startswith(prefixes) or path_part in ignored_exact
 
 
 def _porcelain_unmerged(line: str) -> bool:

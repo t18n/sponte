@@ -6,7 +6,13 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 
-from config.defaults import SPONTE_DIR, TASKS_DIR, WORKTREE_BASE_DIR
+from config.defaults import (
+    SPONTE_DIR,
+    SPONTE_GUARDRAILS_PATH,
+    SPONTE_PROGRESS_PATH,
+    TASKS_DIR,
+    WORKTREE_BASE_DIR,
+)
 from ralph_focus.git_ops import trunk_branch_ref
 from ralph_focus.paths import worktrees_base
 from ralph_focus.workspace_command_detection import detect_workspace_commands
@@ -21,12 +27,27 @@ from ralph_focus.tasks import task_has_pending
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
 
-def _gitignore_entry(worktree_root: str) -> str:
-    return f"{worktree_root.rstrip('/')}/\n"
+def _sponte_root_posix() -> str:
+    return SPONTE_DIR.rstrip("/")
+
+
+def _gitignore_entry_sponte() -> str:
+    return f"{_sponte_root_posix()}/\n"
+
+
+def _worktree_gitignore_line_if_needed(normalized_worktree_root: str) -> str | None:
+    """When worktrees live outside ``.sponte/``, ignore that directory too."""
+    wt = normalized_worktree_root.strip().rstrip("/")
+    if not wt:
+        return None
+    root = _sponte_root_posix()
+    if wt == root or wt.startswith(f"{root}/"):
+        return None
+    return f"{wt}/\n"
 
 
 def _gitignore_covers_sponte(text: str) -> bool:
-    return _gitignore_covers_path(text, WORKTREE_BASE_DIR)
+    return _gitignore_covers_path(text, _sponte_root_posix())
 
 
 def _gitignore_covers_path(text: str, rel_path: str) -> bool:
@@ -39,19 +60,38 @@ def _gitignore_covers_path(text: str, rel_path: str) -> bool:
 
 def ensure_gitignore_sponte(repo_root: Path, worktree_root: str = WORKTREE_BASE_DIR) -> None:
     gi = repo_root / ".gitignore"
-    normalized_worktree_root = worktree_root.rstrip("/")
-    entry = _gitignore_entry(normalized_worktree_root)
+    sponte_root = _sponte_root_posix()
+    sponte_entry = _gitignore_entry_sponte()
+    normalized_wt = worktree_root.strip().rstrip("/") or WORKTREE_BASE_DIR.rstrip("/")
+    wt_under_sponte = normalized_wt == sponte_root or normalized_wt.startswith(f"{sponte_root}/")
+    extra_entry = _worktree_gitignore_line_if_needed(normalized_wt)
+
+    redundant_exact: set[str] = {
+        sponte_root,
+        f"{sponte_root}/",
+        SPONTE_GUARDRAILS_PATH,
+        SPONTE_PROGRESS_PATH,
+    }
+    if wt_under_sponte:
+        redundant_exact.update({normalized_wt, f"{normalized_wt}/"})
+
+    def _write_new(content: str) -> None:
+        gi.write_text(content, encoding="utf-8")
+
     if not gi.is_file():
-        gi.write_text(entry, encoding="utf-8")
+        body = sponte_entry
+        if extra_entry:
+            body += extra_entry
+        _write_new(body)
         return
+
     text = gi.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
     rewritten = False
     normalized_lines: list[str] = []
     for line in lines:
         stripped = line.strip()
-        if stripped in {".sponte", ".sponte/"}:
-            normalized_lines.append(normalized_worktree_root + "/")
+        if stripped in redundant_exact:
             rewritten = True
             continue
         normalized_lines.append(line)
@@ -59,14 +99,22 @@ def ensure_gitignore_sponte(repo_root: Path, worktree_root: str = WORKTREE_BASE_
     if lines:
         normalized_text += "\n"
     if rewritten:
-        gi.write_text(normalized_text, encoding="utf-8")
+        _write_new(normalized_text)
         text = normalized_text
-    if _gitignore_covers_path(text, normalized_worktree_root):
-        return
-    with gi.open("a", encoding="utf-8") as f:
-        if text and not text.endswith("\n"):
-            f.write("\n")
-        f.write(entry)
+
+    def _append_if_missing(rel_root: str, entry: str) -> None:
+        nonlocal text
+        if _gitignore_covers_path(text, rel_root):
+            return
+        with gi.open("a", encoding="utf-8") as f:
+            if text and not text.endswith("\n"):
+                f.write("\n")
+            f.write(entry)
+        text = text + ("" if text.endswith("\n") else "\n") + entry
+
+    _append_if_missing(sponte_root, sponte_entry)
+    if extra_entry:
+        _append_if_missing(normalized_wt, extra_entry)
 
 
 def refresh_priorities_from_backlog(repo: Path) -> None:
@@ -123,12 +171,14 @@ def init_sponte_workspace(
     trunk_branch: str | None = None,
 ) -> None:
     """Create ``.sponte`` tree, ensure gitignore, optional task import, default settings."""
+    settings = load_workspace_settings(repo_root)
+    settings_exists = workspace_settings_path(repo_root).is_file()
+    ensure_gitignore_sponte(repo_root, settings.normalized_worktree_root())
+
     sponte = repo_root / SPONTE_DIR
     sponte.mkdir(parents=True, exist_ok=True)
     for stage in ("backlog", "in-progress", "review-required", "completed"):
         (repo_root / TASKS_DIR / stage).mkdir(parents=True, exist_ok=True)
-    settings = load_workspace_settings(repo_root)
-    settings_exists = workspace_settings_path(repo_root).is_file()
     if trunk_branch is not None and trunk_branch.strip():
         validated = trunk_branch_ref(repo_root, trunk_name=trunk_branch.strip())
         settings = replace(settings, trunk_branch=validated)
@@ -142,7 +192,6 @@ def init_sponte_workspace(
     settings = replace(settings, commands=merged_commands)
     commands_changed = merged_commands != pre_merge_commands
 
-    ensure_gitignore_sponte(repo_root, settings.normalized_worktree_root())
     if not settings_exists or trunk_branch is not None or commands_changed:
         save_workspace_settings(repo_root, settings)
     worktrees_base(repo_root).mkdir(parents=True, exist_ok=True)

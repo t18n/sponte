@@ -194,11 +194,21 @@ def test_init_sponte_adds_gitignore_and_tasks(tmp_path: Path) -> None:
     init_sponte_workspace(root, source=src, trunk_branch="sponte")
 
     gi = (root / ".gitignore").read_text(encoding="utf-8")
-    assert ".sponte/worktrees/" in gi
-    assert ".sponte/\n" not in gi
-    assert ".sponte\n" not in gi
+    assert ".sponte/" in gi
+    assert ".sponte/worktrees/" not in gi
     assert sponte_tasks_layout_valid(root)
     assert (root / TASKS_DIR / "backlog" / "seed.md").is_file()
+
+
+def test_ensure_gitignore_sponte_adds_external_worktree_root(tmp_path: Path) -> None:
+    from ralph_focus.workspace_init import ensure_gitignore_sponte
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    ensure_gitignore_sponte(root, worktree_root=".sponte-external/wt")
+    text = (root / ".gitignore").read_text(encoding="utf-8")
+    assert ".sponte/" in text
+    assert ".sponte-external/wt/" in text
 
 
 def test_init_sponte_allows_empty_task_store(tmp_path: Path) -> None:

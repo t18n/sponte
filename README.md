@@ -127,9 +127,9 @@ Workspace-owned files live under `workspace/.sponte/`:
 
 Git ignore rules:
 
-- The configured worktree root should be gitignored. By default that is `.sponte/worktrees/`.
-- `.sponte/tasks/` and tracked workspace settings should remain versioned.
-- `sponte init` updates the workspace `.gitignore` when it bootstraps a workspace.
+- `sponte init` appends `.sponte/` to the workspace `.gitignore` so the whole Sponte directory stays untracked by default.
+- If `worktree_root` is outside `.sponte/`, that path is appended as well.
+- To version parts of `.sponte/` (for example settings or tasks), add them with `git add -f` or adjust `.gitignore`.
 
 Cross-workspace runtime state lives outside the repo checkout:
 

@@ -4,6 +4,14 @@ from config.defaults import SPONTE_GUARDRAILS_PATH, SPONTE_PROGRESS_PATH, WORKTR
 from ralph_focus.primary_precheck import PrimaryPrecheckKind, merge_precheck_classify_porcelain
 
 
+def test_merge_precheck_ignores_any_path_under_dot_sponte() -> None:
+    porcelain = "?? .sponte/tasks/backlog/example.md"
+
+    result = merge_precheck_classify_porcelain(porcelain, merge_head=False)
+
+    assert result.kind is PrimaryPrecheckKind.CLEAN
+
+
 def test_merge_precheck_ignores_repo_local_sponte_state() -> None:
     porcelain = "\n".join(
         [
@@ -34,6 +42,4 @@ def test_gitignore_ignores_repo_local_sponte_state() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     text = (repo_root / ".gitignore").read_text(encoding="utf-8")
 
-    assert f"{WORKTREE_BASE_DIR}/" in text
-    assert SPONTE_GUARDRAILS_PATH in text
-    assert SPONTE_PROGRESS_PATH in text
+    assert ".sponte/" in text
