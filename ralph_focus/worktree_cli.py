@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from rich.console import Console
 from rich.prompt import Confirm, IntPrompt
 
-from config.defaults import WORKTREE_BASE_DIR
 from ralph_focus.git_ops import git, worktree_list_paths
+from ralph_focus.paths import worktrees_base
 
 
 def worktree_prune_clean(workspace: Path, *, force: bool, console: Console) -> int:
@@ -49,14 +48,22 @@ def worktree_prune_clean(workspace: Path, *, force: bool, console: Console) -> i
 
 
 def list_ralph_managed(workspace: Path) -> list[Path]:
-    pat = re.compile(rf"/{re.escape(WORKTREE_BASE_DIR)}/")
-    return [Path(p) for p in worktree_list_paths(workspace) if pat.search(p)]
+    base = worktrees_base(workspace).resolve()
+    out: list[Path] = []
+    for raw_path in worktree_list_paths(workspace):
+        path = Path(raw_path)
+        try:
+            path.resolve().relative_to(base)
+        except ValueError:
+            continue
+        out.append(path)
+    return out
 
 
 def worktree_remove_interactive(workspace: Path, console: Console) -> int:
     candidates = list_ralph_managed(workspace)
     if not candidates:
-        console.print(f"No worktrees under */{WORKTREE_BASE_DIR}/ found.")
+        console.print(f"No worktrees under {worktrees_base(workspace)} found.")
         return 0
     for i, p in enumerate(candidates, 1):
         console.print(f"  {i}) {p}")

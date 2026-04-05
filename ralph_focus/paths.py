@@ -148,4 +148,9 @@ def readable_base_task_file(workspace_root: Path) -> Path:
 
 
 def worktrees_base(primary: Path) -> Path:
-    return primary / WORKTREE_BASE_DIR
+    from ralph_focus.workspace_settings import load_workspace_settings
+
+    configured = Path(load_workspace_settings(primary).normalized_worktree_root())
+    if configured.is_absolute():
+        return configured
+    return primary / configured

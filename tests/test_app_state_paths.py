@@ -58,6 +58,15 @@ def test_worktrees_base_matches_worktree_base_dir_default(tmp_path: Path) -> Non
     assert worktrees_base(tmp_path) == tmp_path / WORKTREE_BASE_DIR
 
 
+def test_worktrees_base_uses_workspace_setting_override(tmp_path: Path) -> None:
+    from ralph_focus.paths import worktrees_base
+    from ralph_focus.workspace_settings import WorkspaceSettings, save_workspace_settings
+
+    save_workspace_settings(tmp_path, WorkspaceSettings(worktree_root=".sponte/custom-worktrees"))
+
+    assert worktrees_base(tmp_path) == tmp_path / ".sponte/custom-worktrees"
+
+
 def test_sponte_state_base_dir_uses_xdg_when_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SPONTE_STATE_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))

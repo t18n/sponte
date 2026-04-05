@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from ralph_focus.git_ops import git_primary_checkout_root, git_toplevel
-from ralph_focus.workspace_settings import WorkspaceSettings, save_workspace_settings
+from ralph_focus.git_ops import git_primary_checkout_root
+from ralph_focus.workspace_settings import load_workspace_settings, save_workspace_settings
 from ralph_focus.interactive_setup import resolve_choice_index
 from ralph_focus.workspace_init import init_sponte_workspace
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
@@ -75,7 +76,7 @@ def resolve_primary_workspace(
             raise typer.Exit(1)
         console.print(
             f"[red]{prompt_label}: `.sponte/tasks` is missing or invalid; "
-            f"run `sponte plan` or initialize the workspace.[/red]"
+            f"run `sponte init` first.[/red]"
         )
         raise typer.Exit(1)
 
@@ -95,7 +96,7 @@ def _require_valid_tasks(
     if not interactive:
         console.print(
             f"[red]{prompt_label}: `.sponte/tasks` is missing or invalid; "
-            f"run `sponte plan` or initialize the workspace.[/red]"
+            f"run `sponte init` first.[/red]"
         )
         raise typer.Exit(1)
     console.print(f"[yellow]{root} does not have a valid `.sponte/tasks` layout; pick another workspace.[/yellow]")
@@ -143,36 +144,37 @@ def _prompt_workspace(console: Console, *, prompt_label: str) -> Path:
     return root
 
 
-def ensure_tasks_layout_with_prompt(
+def bootstrap_workspace_with_prompt(
     primary: Path,
     *,
     console: Console,
     interactive: bool,
     trunk_branch: str | None = None,
-) -> bool:
-    if sponte_tasks_layout_valid(primary):
-        return False
+) -> None:
     if not interactive:
         console.print(
-            "[red]`.sponte/tasks` is missing or invalid; use `sponte plan` with a TTY or initialize manually.[/red]"
+            "[red]`sponte init` requires an interactive terminal (stdin must be a TTY).[/red]"
         )
         raise typer.Exit(1)
-    console.print("[yellow]No valid `.sponte/tasks` layout; initialize from a markdown file or folder.[/yellow]")
-    src_raw = Prompt.ask("Source path (file or folder of `.md` tasks)")
-    source = Path(src_raw.strip()).expanduser()
-    if not source.is_absolute():
-        source = (Path.cwd() / source).resolve()
-    if not source.exists():
-        console.print(f"[red]Source does not exist:[/red] {source}")
-        raise typer.Exit(1)
-    trunk_raw = trunk_branch if trunk_branch is not None else Prompt.ask("Trunk branch name (created if missing)", default="sponte")
+    source: Path | None = None
+    if Confirm.ask("Migrate tasks from an existing markdown file or folder?", default=False):
+        src_raw = Prompt.ask("Source path (file or folder of `.md` tasks)")
+        source = Path(src_raw.strip()).expanduser()
+        if not source.is_absolute():
+            source = (Path.cwd() / source).resolve()
+        if not source.exists():
+            console.print(f"[red]Source does not exist:[/red] {source}")
+            raise typer.Exit(1)
+    trunk_raw = trunk_branch if trunk_branch is not None else Prompt.ask(
+        "Trunk branch name (created if missing)",
+        default="sponte",
+    )
     try:
         init_sponte_workspace(primary, source=source, trunk_branch=trunk_raw.strip() or None)
     except (OSError, RuntimeError) as exc:
         console.print(f"[red]Init failed:[/red] {exc}")
         raise typer.Exit(1) from exc
     console.print(f"[green]Initialized Sponte tasks under[/green] {primary / '.sponte'}")
-    return True
 
 
 def resolve_trunk_branch_ref(primary: Path, *, cli_override: str | None) -> str:
@@ -193,12 +195,12 @@ def persist_trunk_branch_override(primary: Path, trunk_branch: str) -> str:
     if not name:
         raise ValueError("trunk branch must be non-empty")
     validated = trunk_branch_ref(primary, trunk_name=name)
-    save_workspace_settings(primary, WorkspaceSettings(trunk_branch=validated))
+    save_workspace_settings(primary, replace(load_workspace_settings(primary), trunk_branch=validated))
     return validated
 
 
 __all__ = [
-    "ensure_tasks_layout_with_prompt",
+    "bootstrap_workspace_with_prompt",
     "persist_trunk_branch_override",
     "resolve_git_repo_root",
     "resolve_primary_workspace",

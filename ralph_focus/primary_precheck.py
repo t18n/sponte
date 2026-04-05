@@ -8,6 +8,7 @@ from pathlib import Path
 
 from config.defaults import LEGACY_RALPH_DATA_DIR, SPONTE_GUARDRAILS_PATH, SPONTE_PROGRESS_PATH, WORKTREE_BASE_DIR
 from ralph_focus.git_ops import git
+from ralph_focus.paths import worktrees_base
 
 
 class PrimaryPrecheckKind(Enum):
@@ -32,17 +33,17 @@ def _porcelain_path(line: str) -> str:
     return path_part
 
 
-def _ignored_for_merge_precheck(path_part: str) -> bool:
+def _ignored_for_merge_precheck(path_part: str, *, worktree_root: str | None = None) -> bool:
     ignored_prefixes = (
         f"{LEGACY_RALPH_DATA_DIR}/",
         ".ralph/",
-        f"{WORKTREE_BASE_DIR}/",
     )
+    dynamic_prefixes = (f"{(worktree_root or WORKTREE_BASE_DIR).rstrip('/')}/",)
     ignored_exact = {
         SPONTE_GUARDRAILS_PATH,
         SPONTE_PROGRESS_PATH,
     }
-    return path_part.startswith(ignored_prefixes) or path_part in ignored_exact
+    return path_part.startswith(ignored_prefixes + dynamic_prefixes) or path_part in ignored_exact
 
 
 def _porcelain_unmerged(line: str) -> bool:
@@ -80,6 +81,7 @@ def merge_precheck_classify_porcelain(
     porcelain_out: str,
     *,
     merge_head: bool,
+    worktree_root: str | None = None,
     status_failed: bool = False,
 ) -> PrimaryPrecheckResult:
     """
@@ -95,7 +97,7 @@ def merge_precheck_classify_porcelain(
         if len(line) < 4:
             continue
         path_part = _porcelain_path(line)
-        if _ignored_for_merge_precheck(path_part):
+        if _ignored_for_merge_precheck(path_part, worktree_root=worktree_root):
             continue
         non_ignored.append(line)
         if _porcelain_unmerged(line):
@@ -127,4 +129,14 @@ def primary_merge_precheck_state(primary: Path) -> PrimaryPrecheckResult:
 
     has_merge_head = merge_in_progress(primary)
     code, out, _ = git(primary, "status", "--porcelain")
-    return merge_precheck_classify_porcelain(out, merge_head=has_merge_head, status_failed=(code != 0))
+    worktree_root: str | None = None
+    try:
+        worktree_root = worktrees_base(primary).resolve().relative_to(primary.resolve()).as_posix()
+    except ValueError:
+        worktree_root = None
+    return merge_precheck_classify_porcelain(
+        out,
+        merge_head=has_merge_head,
+        worktree_root=worktree_root,
+        status_failed=(code != 0),
+    )

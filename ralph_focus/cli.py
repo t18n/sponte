@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import sys
 import shlex
@@ -15,7 +16,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import IntPrompt, Prompt
+from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
 from config.defaults import (
@@ -31,7 +32,7 @@ from config.defaults import TASKS_DIR
 from ralph_focus.contracts import get_harness
 from ralph_focus.cycle import AutoFocusConfig, ProgressMode, run_one_cycle
 from ralph_focus.failure_detection import FailureKind
-from ralph_focus.interactive_setup import auto_focus_entry_choices, resolve_choice_index
+from ralph_focus.interactive_setup import resolve_choice_index
 from ralph_focus.paths import rotation_handoff_file
 from ralph_focus.preflight import run_preflight
 from ralph_focus.progress import cycle_line
@@ -42,22 +43,22 @@ from ralph_focus.ralph_session_lock import (
 )
 from ralph_focus.resume import ResumeState, clear_resume as resume_clear_state
 from ralph_focus.resume import (
-    list_recoverable_resumes,
     load_resume,
     resolve_runner_for_worktree,
     resume_path,
 )
 from ralph_focus.session_stats import SessionStats
-from ralph_focus.tasks import count_checklist, priorities_file, priority_task_paths_pending, task_label
+from ralph_focus.tasks import count_checklist, task_label
 from ralph_focus.time_parse import format_seconds_human, parse_duration_to_seconds
 from ralph_focus.token_rotation import rotation_policy_from_overrides
 from ralph_focus.worktree_cli import worktree_prune_clean, worktree_remove_interactive
 from ralph_focus.workspace_resolve import (
-    ensure_tasks_layout_with_prompt,
-    persist_trunk_branch_override,
+    bootstrap_workspace_with_prompt,
     resolve_git_repo_root,
     resolve_primary_workspace,
 )
+from ralph_focus.workspace_init import refresh_priorities_from_backlog
+from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
 app = typer.Typer(help="Sponte — standalone task harness powered by Ralph core.", no_args_is_help=True)
 console = Console(stderr=True)
@@ -273,34 +274,30 @@ def _cli_allows_prompts() -> bool:
     return sys.stdin.isatty()
 
 
-def _pick_interactive_choice(title: str, choices: list[tuple[str, str]]) -> str:
-    table = Table(title=title)
-    table.add_column("#")
-    table.add_column("Choice")
-    for idx, (_choice_id, label) in enumerate(choices, 1):
-        table.add_row(str(idx), label)
-    console.print(table)
-    raw_idx = IntPrompt.ask("Choose index", default=1)
-    try:
-        idx = resolve_choice_index(choice_count=len(choices), raw_index=raw_idx)
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
-    return choices[idx][0]
-
-
 def task_list_choice_paths(primary: Path, pending: list[Path]) -> list[str]:
     return [path.relative_to(primary).as_posix() for path in pending]
 
 
-def _pick_task_from_task_list(primary: Path) -> str | None:
-    pri_file = priorities_file(primary)
-    pending = priority_task_paths_pending(pri_file, primary)
+def _prompt_required(label: str, *, default: str | None = None) -> str:
+    raw = Prompt.ask(label, default=default) if default is not None else Prompt.ask(label)
+    value = raw.strip()
+    if not value:
+        console.print(f"[red]{label} is required.[/red]")
+        raise typer.Exit(1)
+    return value
+
+
+def _backlog_task_paths(primary: Path) -> list[Path]:
+    return sorted((primary / TASKS_DIR / "backlog").rglob("*.md"))
+
+
+def _pick_existing_backlog_task(primary: Path) -> Path | None:
+    pending = _backlog_task_paths(primary)
     if not pending:
-        console.print(f"[yellow]No pending tasks found in {pri_file}.[/yellow]")
+        console.print("[yellow]No backlog tasks to refine yet; creating a new one.[/yellow]")
         return None
     choice_paths = task_list_choice_paths(primary, pending)
-    table = Table(title="Pending task list")
+    table = Table(title="Backlog tasks")
     table.add_column("#")
     table.add_column("Task")
     for idx, rel_path in enumerate(choice_paths, 1):
@@ -312,76 +309,96 @@ def _pick_task_from_task_list(primary: Path) -> str | None:
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    return choice_paths[idx]
+    return pending[idx]
 
 
-def _prompt_auto_focus_interactive(
-    workspace: Path | None,
-) -> tuple[str | None, str | None, str | None]:
-    """Return ``(resume, complete_worktree, task)`` for ``--interactive`` (exactly one mode set)."""
+def _existing_task_defaults(task_path: Path) -> tuple[str, str, str]:
+    text = task_path.read_text(encoding="utf-8", errors="replace")
+    title_match = re.search(r"^task:\s*(.+)$", text, flags=re.MULTILINE)
+    command_match = re.search(r"^test_command:\s*(.+)$", text, flags=re.MULTILINE)
+    goal_match = re.search(r"(?ms)^# Goal\s+(.*?)(?:^## |\Z)", text)
+    title = title_match.group(1).strip() if title_match else task_path.stem.replace("-", " ")
+    goal = goal_match.group(1).strip() if goal_match else ""
+    test_command = command_match.group(1).strip() if command_match else "uv run pytest -q"
+    return title, goal, test_command
+
+
+def _slugify_task_title(title: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return slug or "task"
+
+
+def _next_task_path(primary: Path, title: str) -> Path:
+    slug = _slugify_task_title(title)
+    backlog = primary / TASKS_DIR / "backlog"
+    candidate = backlog / f"{slug}.md"
+    idx = 2
+    while candidate.exists():
+        candidate = backlog / f"{slug}-{idx}.md"
+        idx += 1
+    return candidate
+
+
+def _task_markdown(*, title: str, goal: str, test_command: str) -> str:
+    return (
+        f"task: {title}\n"
+        f"test_command: {test_command}\n\n"
+        "# Goal\n\n"
+        f"{goal}\n\n"
+        "## Checklist\n\n"
+        "- [ ] Write a concrete implementation plan\n"
+        "- [ ] Implement the requested change\n"
+        f"- [ ] Run `{test_command}`\n"
+    )
+
+
+def _plan_tasks_interactively(primary: Path) -> list[Path]:
+    created: list[Path] = []
+    backlog = primary / TASKS_DIR / "backlog"
+    backlog.mkdir(parents=True, exist_ok=True)
+    while True:
+        existing_task: Path | None = None
+        if _backlog_task_paths(primary) and Confirm.ask("Refine an existing backlog task?", default=False):
+            existing_task = _pick_existing_backlog_task(primary)
+        if existing_task is not None:
+            title_default, goal_default, test_command_default = _existing_task_defaults(existing_task)
+        else:
+            title_default, goal_default, test_command_default = (None, None, "uv run pytest -q")
+        title = _prompt_required("Task title", default=title_default)
+        goal = _prompt_required("What do you want to achieve?", default=goal_default)
+        test_command = _prompt_required("Verification command", default=test_command_default)
+        task_path = existing_task or _next_task_path(primary, title)
+        task_path.write_text(
+            _task_markdown(title=title, goal=goal, test_command=test_command),
+            encoding="utf-8",
+        )
+        created.append(task_path)
+        verb = "Updated" if existing_task is not None else "Created"
+        console.print(f"[green]{verb} task:[/green] {task_path.relative_to(primary)}")
+        if not Confirm.ask("Add another task?", default=False):
+            break
+    refresh_priorities_from_backlog(primary)
+    return created
+
+
+@app.command("init")
+def cmd_init() -> None:
     primary = resolve_git_repo_root(
-        workspace,
+        None,
+        console=console,
+        interactive=False,
+    )
+    if not _cli_allows_prompts():
+        console.print("[red]`sponte init` requires an interactive terminal (stdin must be a TTY).[/red]")
+        raise typer.Exit(1)
+    if sponte_tasks_layout_valid(primary):
+        console.print(f"[green]Workspace already initialized:[/green] {primary / '.sponte'}")
+        raise typer.Exit(0)
+    bootstrap_workspace_with_prompt(
+        primary,
         console=console,
         interactive=True,
     )
-    entry = _pick_interactive_choice(
-        "Auto-focus",
-        [(choice.id, choice.label) for choice in auto_focus_entry_choices()],
-    )
-    if entry == "resume":
-        rid = Prompt.ask("Generation id to resume").strip()
-        if not rid:
-            raise ValueError("resume requires a non-empty generation id")
-        return (rid, None, None)
-    if entry == "complete-worktree":
-        rows = list_recoverable_resumes(primary)
-        if not rows:
-            raw = Prompt.ask("Worktree path")
-        else:
-            table = Table(title="Recoverable worktrees (saved resume state)")
-            table.add_column("#")
-            table.add_column("Worktree")
-            table.add_column("Phase")
-            table.add_column("Generation")
-            for idx, (runner_id, st) in enumerate(rows, 1):
-                table.add_row(str(idx), st.wt_path, st.phase, runner_id)
-            console.print(table)
-            raw_idx = IntPrompt.ask(
-                f"Choose 1–{len(rows)} or 0 to enter a worktree path",
-                default=1,
-            )
-            if raw_idx == 0:
-                raw = Prompt.ask("Worktree path")
-            else:
-                try:
-                    idx = resolve_choice_index(choice_count=len(rows), raw_index=raw_idx)
-                except ValueError as exc:
-                    console.print(f"[red]{exc}[/red]")
-                    raise typer.Exit(1) from exc
-                raw = rows[idx][1].wt_path
-        path_str = str(Path(raw).expanduser().resolve())
-        return (None, path_str, None)
-    if entry == "specific-task":
-        resolve_primary_workspace(
-            primary,
-            console=console,
-            interactive=True,
-        )
-        rel = Prompt.ask("Task path", default=f"{TASKS_DIR}/backlog/").strip()
-        if not rel:
-            raise ValueError("task path is required")
-        return (None, None, rel)
-    if entry == "task-list":
-        exec_ws = resolve_primary_workspace(
-            primary,
-            console=console,
-            interactive=True,
-        )
-        picked = _pick_task_from_task_list(exec_ws)
-        if picked is None:
-            raise typer.Exit(1)
-        return (None, None, picked)
-    raise ValueError(f"unknown auto-focus entry: {entry}")
 
 
 @app.command("auto-focus")
@@ -466,46 +483,8 @@ def cmd_auto_focus(
             help="Stable generation id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume / --complete-worktree",
         ),
     ] = None,
-    interactive: Annotated[
-        bool,
-        typer.Option(
-            "--interactive",
-            "-i",
-            help="Guided prompts: resume, orphan worktree recovery, or pick a task (requires a TTY)",
-        ),
-    ] = False,
     skip_preflight: Annotated[bool, typer.Option("--skip-preflight", hidden=True)] = False,
 ) -> None:
-    if interactive:
-        if not _cli_allows_prompts():
-            console.print(
-                "[red]--interactive requires an interactive terminal (stdin must be a TTY).[/red]"
-            )
-            raise typer.Exit(1)
-        conflicts: list[str] = []
-        if task:
-            conflicts.append("TASK path")
-        if resume is not None:
-            conflicts.append("--resume")
-        if complete_worktree is not None:
-            conflicts.append("--complete-worktree")
-        if clear_resume_id is not None:
-            conflicts.append("--clear-resume")
-        if runner_id is not None:
-            conflicts.append("--runner-id")
-        if conflicts:
-            console.print(
-                "[red]--interactive cannot be combined with: "
-                + ", ".join(conflicts)
-                + "[/red]"
-            )
-            raise typer.Exit(1)
-        try:
-            resume, complete_worktree, task = _prompt_auto_focus_interactive(workspace)
-        except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
-
     primary = resolve_git_repo_root(
         workspace,
         console=console,
@@ -554,19 +533,18 @@ def cmd_auto_focus(
         console.print("[red]Do not combine --resume RUNNER_ID with --runner-id; the resume id is the generation[/red]")
         raise typer.Exit(1)
 
+    if resume_id is None and not cwt_arg and not task:
+        console.print(
+            "[red]`sponte auto-focus` requires a task path, `--resume`, or `--complete-worktree`. "
+            "Use `sponte plan` to create tasks first.[/red]"
+        )
+        raise typer.Exit(1)
     if resume_id is None and not cwt_arg:
-        initialized = ensure_tasks_layout_with_prompt(
+        primary = resolve_primary_workspace(
             primary,
             console=console,
-            interactive=_cli_allows_prompts(),
-            trunk_branch=trunk_branch,
+            interactive=False,
         )
-        if initialized:
-            console.print(
-                "[yellow]Workspace tasks were initialized. Review and commit the new `.sponte` files, "
-                "then rerun `sponte auto-focus`.[/yellow]"
-            )
-            raise typer.Exit(0)
 
     loaded_resume_state: ResumeState | None = None
     if cwt_arg:
@@ -939,40 +917,22 @@ def cmd_plan(
         Path | None,
         typer.Option("--workspace", "-w", help="Git checkout root (run from anywhere)"),
     ] = None,
-    trunk_branch: Annotated[
-        str | None,
-        typer.Option("--trunk-branch", help="Override the default trunk branch stored in workspace settings"),
-    ] = None,
-    interactive: Annotated[
-        bool,
-        typer.Option(
-            "--interactive",
-            "-i",
-            help="Force guided workspace and init prompts (requires a TTY)",
-        ),
-    ] = False,
 ) -> None:
-    if interactive and not _cli_allows_prompts():
-        console.print("[red]plan --interactive requires an interactive terminal (stdin must be a TTY).[/red]")
-        raise typer.Exit(1)
-    interactive_mode = _cli_allows_prompts() or interactive
     primary = resolve_git_repo_root(
         workspace,
         console=console,
-        interactive=interactive_mode,
+        interactive=True,
     )
-    initialized = ensure_tasks_layout_with_prompt(
+    primary = resolve_primary_workspace(
         primary,
         console=console,
-        interactive=interactive_mode,
-        trunk_branch=trunk_branch,
+        interactive=False,
     )
-    if trunk_branch is not None and trunk_branch.strip():
-        persist_trunk_branch_override(primary, trunk_branch)
-    if initialized:
-        console.print("[green]Workspace initialized. Review the generated `.sponte/tasks` files and commit when ready.[/green]")
-    else:
-        console.print("[green]Workspace tasks already look valid.[/green]")
+    if not _cli_allows_prompts():
+        console.print("[red]`sponte plan` requires an interactive terminal (stdin must be a TTY).[/red]")
+        raise typer.Exit(1)
+    created = _plan_tasks_interactively(primary)
+    console.print(f"[green]Planned {len(created)} task(s) in[/green] {primary / TASKS_DIR}")
 
 
 def main() -> None:

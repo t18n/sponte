@@ -24,7 +24,7 @@ from ralph_focus.cycle import (
     should_rotate_after_usage,
 )
 from ralph_focus.failure_detection import FailureKind, ProgressSnapshot, classify_agent_failure
-from ralph_focus.interactive_setup import build_exec_args
+from ralph_focus.interactive_setup import resolve_choice_index
 from ralph_focus.phase_policy import phase_model_for, phase_uses_agent
 from ralph_focus.primary_precheck import (
     PrimaryPrecheckKind,
@@ -345,11 +345,7 @@ def _test_failure_classification() -> None:
 
 
 def _test_interactive_setup() -> None:
-    assert build_exec_args(entry="resume", value="lane-a")[:3] == [
-        "auto-focus",
-        "--resume",
-        "lane-a",
-    ]
+    assert resolve_choice_index(choice_count=3, raw_index=2) == 1
 
 
 def _test_primary_precheck_classify() -> None:

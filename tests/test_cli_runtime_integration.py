@@ -28,7 +28,7 @@ def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Pa
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(cli, "ensure_tasks_layout_with_prompt", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
     monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
@@ -52,13 +52,39 @@ def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["auto-focus", "--once", "--skip-preflight", "--agent", "cursor"])
+    result = runner.invoke(
+        cli.app,
+        [
+            "auto-focus",
+            f"{TASKS_DIR}/backlog/example.md",
+            "--once",
+            "--skip-preflight",
+            "--agent",
+            "cursor",
+        ],
+    )
 
     assert result.exit_code == 0
     assert seen["use_resume"] is False
     assert seen["resume_state"] is None
     assert seen["cfg"].harness is harness
     assert seen["cfg"].runner_id == "rap-test1234"
+
+
+def test_auto_focus_requires_explicit_task_or_resume(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should stop before preflight")))
+    monkeypatch.setattr(cli, "get_harness", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should stop before harness lookup")))
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["auto-focus", "--once"])
+
+    assert result.exit_code != 0
+    output = (result.stdout + result.stderr).lower()
+    assert "requires a task path" in output
+    assert "sponte plan" in output
 
 
 def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_config(monkeypatch, tmp_path: Path) -> None:
@@ -89,7 +115,7 @@ def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_confi
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(cli, "ensure_tasks_layout_with_prompt", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
@@ -169,7 +195,7 @@ def test_auto_focus_resume_prints_restored_task_pick_settings(monkeypatch, tmp_p
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(cli, "ensure_tasks_layout_with_prompt", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "load_resume", lambda _primary, runner_id: resume_state)
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "get_harness", lambda name: _Harness(name), raising=False)
@@ -227,7 +253,7 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
     cycles: list[bool] = []
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(cli, "ensure_tasks_layout_with_prompt", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
         cli,
         "resolve_runner_for_worktree",
@@ -302,7 +328,7 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
     seen: list[bool] = []
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(cli, "ensure_tasks_layout_with_prompt", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
         cli,
         "resolve_runner_for_worktree",
@@ -375,7 +401,7 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
     seen: list[bool] = []
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(cli, "ensure_tasks_layout_with_prompt", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
         cli,
         "resolve_runner_for_worktree",

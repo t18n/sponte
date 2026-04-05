@@ -78,21 +78,20 @@ The workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) bu
 ## Core Commands
 
 ```bash
-# Initialize or refresh a workspace task store
-sponte plan --workspace /absolute/path/to/workspace
+# Bootstrap Sponte inside the current git workspace
+sponte init
 
-# Start an auto-focus cycle from anywhere
-sponte auto-focus --workspace /absolute/path/to/workspace
+# Create or refine backlog tasks in an initialized workspace
+sponte plan --workspace /absolute/path/to/workspace
 
 # Override the workspace trunk branch for one run
 sponte auto-focus --workspace /absolute/path/to/workspace --trunk-branch main
 
+# Start an auto-focus cycle for one explicit task
+sponte auto-focus --workspace /absolute/path/to/workspace .sponte/tasks/backlog/example-task.md
+
 # Recover one orphaned worktree and exit
 sponte auto-focus --workspace /absolute/path/to/workspace --complete-worktree "/absolute/path/to/workspace/.sponte/worktrees/raf-example-1234"
-
-# Guided prompts (resume, worktree recovery, or task pick) — requires a TTY
-sponte auto-focus --workspace /absolute/path/to/workspace --interactive
-sponte plan --workspace /absolute/path/to/workspace --interactive
 
 # Worktree maintenance
 sponte worktree-prune-clean --workspace /absolute/path/to/workspace
@@ -103,16 +102,16 @@ sponte worktree-remove --workspace /absolute/path/to/workspace
 
 Workspace-owned files live under `workspace/.sponte/`:
 
-- `.sponte/settings.json` stores workspace settings such as the default trunk branch.
+- `.sponte/settings.json` stores workspace settings such as the default trunk branch and worktree root.
 - `.sponte/guardrails.md` stores durable workspace guidance.
 - `.sponte/tasks/` is the canonical task store.
-- `.sponte/worktrees/` is the canonical worktree root.
+- `.sponte/worktrees/` is the default worktree root.
 
 Git ignore rules:
 
-- `.sponte/worktrees/` should be gitignored.
+- The configured worktree root should be gitignored. By default that is `.sponte/worktrees/`.
 - `.sponte/tasks/` and tracked workspace settings should remain versioned.
-- `sponte plan` updates the workspace `.gitignore` automatically when it initializes a workspace.
+- `sponte init` updates the workspace `.gitignore` when it bootstraps a workspace.
 
 Cross-workspace runtime state lives outside the repo checkout:
 
@@ -131,23 +130,32 @@ Default app-state locations:
 
 ## Init Flow
 
-`sponte plan` is the workspace/task-generation entrypoint.
+`sponte init` is the workspace bootstrap entrypoint.
 
 It will:
 
-1. resolve the target workspace from `--workspace`, the current checkout, or the known-workspace registry
-2. prompt for a source markdown file or folder when `.sponte/tasks` is missing or invalid
-3. create `.sponte/tasks/`, `.sponte/worktrees/`, and `.sponte/settings.json`
-4. set the default trunk branch to `sponte` unless overridden
+1. require that you run it inside a git checkout
+2. optionally import tasks from an existing markdown file or folder
+3. create `.sponte/tasks/`, `.sponte/settings.json`, and the default worktree root
+4. set the default trunk branch to `sponte` unless you choose another name
 5. ensure the local trunk branch exists
 
-After initializing a new task store, review and commit the generated `.sponte/tasks` files before starting the first `auto-focus` cycle.
+After initialization, use `sponte plan` to add or refine backlog tasks before starting the first `auto-focus` cycle.
+
+## Planning Flow
+
+`sponte plan` works only in an initialized workspace.
+
+It will:
+
+1. validate that `.sponte/tasks` already exists
+2. prompt for one or more task titles, goals, and verification commands
+3. write task markdown files under `.sponte/tasks/backlog/`
+4. refresh `.sponte/tasks/priorities.md`
 
 ## Recovery Flow
 
 `sponte auto-focus --complete-worktree <path>` uses saved Sponte runtime state to recover an orphaned worktree, resume exactly one cycle for that worktree, and then exit.
-
-`sponte auto-focus --interactive` exposes the same recovery flow and can list recoverable worktrees by number.
 
 ## AI Rules
 

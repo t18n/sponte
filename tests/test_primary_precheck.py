@@ -18,6 +18,18 @@ def test_merge_precheck_ignores_repo_local_sponte_state() -> None:
     assert result.kind is PrimaryPrecheckKind.CLEAN
 
 
+def test_merge_precheck_ignores_custom_configured_worktree_root() -> None:
+    porcelain = "?? .sponte/custom-worktrees/raf-demo"
+
+    result = merge_precheck_classify_porcelain(
+        porcelain,
+        merge_head=False,
+        worktree_root=".sponte/custom-worktrees",
+    )
+
+    assert result.kind is PrimaryPrecheckKind.CLEAN
+
+
 def test_gitignore_ignores_repo_local_sponte_state() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     text = (repo_root / ".gitignore").read_text(encoding="utf-8")
