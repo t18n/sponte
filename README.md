@@ -101,9 +101,9 @@ sponte task-resume my-task-abc123 --workspace /absolute/path/to/workspace
 
 # Inspect task/session state (repo-local under `.sponte/jobs/`)
 sponte status --workspace /absolute/path/to/workspace
-sponte task-list
-sponte task-current
-sponte session-current
+sponte task-list --workspace /absolute/path/to/workspace
+sponte task-current --workspace /absolute/path/to/workspace
+sponte session-current --workspace /absolute/path/to/workspace
 
 # Recover one orphaned worktree and exit
 sponte agent --workspace /absolute/path/to/workspace --complete-worktree "/absolute/path/to/workspace/.sponte/worktrees/wt-…"

@@ -51,11 +51,11 @@ def test_priority_task_paths_pending_falls_back_to_legacy_layout(tmp_path: Path)
     assert priority_task_paths_pending(priorities_file(tmp_path), tmp_path) == [legacy_task]
 
 
-def test_compute_task_id_uses_stem_and_title_hash() -> None:
+def test_compute_task_id_uses_title_slug_and_title_hash() -> None:
     from ralph_focus.tasks import compute_task_id, task_title_hash_suffix
 
-    tid = compute_task_id(task_stem="add-login", task_title="Add OAuth login")
-    assert tid.startswith("add-login-")
+    tid = compute_task_id(task_stem="internal-file-name", task_title="Add OAuth login")
+    assert tid.startswith("add-oauth-login-")
     assert len(tid.split("-")[-1]) == 6
     assert task_title_hash_suffix("Add OAuth login") == tid.rsplit("-", 1)[-1]
 

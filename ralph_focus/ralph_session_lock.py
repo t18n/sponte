@@ -46,8 +46,7 @@ def write_ralph_lock(
         "resuming_this_cycle": resuming_this_cycle,
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "resume_hint": (
-            "sponte agent --resume "
-            f"{shlex.quote(runner_id)} --plan-model auto --execute-model auto"
+            f"sponte session-resume {shlex.quote(runner_id)}"
         ),
     }
     data = json.dumps(payload, indent=2) + "\n"

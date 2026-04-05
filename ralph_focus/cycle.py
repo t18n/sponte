@@ -60,7 +60,6 @@ from ralph_focus.paths import (
     rotation_handoff_file,
     sanitize_job_segment,
     selection_lock_path,
-    task_lock_path_for_rel,
     worktrees_base,
     workspace_task_claim_lock_path,
 )
@@ -260,7 +259,6 @@ class AutoFocusConfig:
     session_deadline_epoch: str = ""
     current_wt_path: Path | None = None
     runner_id: str = "default"
-    held_task_lock_path: Path | None = None
     held_workspace_claim_lock_path: Path | None = None
     task_id: str = ""
     rotate_policy: TokenRotationPolicy = field(
@@ -372,9 +370,6 @@ class AutoFocusConfig:
 
 
 def _release_task_lock(cfg: AutoFocusConfig) -> None:
-    if cfg.held_task_lock_path is not None:
-        release_lock(cfg.held_task_lock_path)
-        cfg.held_task_lock_path = None
     if cfg.held_workspace_claim_lock_path is not None:
         release_lock(cfg.held_workspace_claim_lock_path)
         cfg.held_workspace_claim_lock_path = None
@@ -1131,7 +1126,7 @@ def run_one_cycle(
                     if not _commit_worktree_pending_if_dirty(wt_path, logf, "pre-merge agent"):
                         merge_precheck_failed(
                             "Could not commit pending worktree changes before merge.",
-                            "See run log (AUTO_COMMIT sections). Fix git state in the worktree, then retry with --resume RUNNER_ID.",
+                            "See run log (AUTO_COMMIT sections). Fix git state in the worktree, then retry with `sponte session-resume SESSION_ID`.",
                         )
                         return 1
                     if cfg.progress != "off":
@@ -1209,7 +1204,7 @@ def run_one_cycle(
                             if precheck_rc != 0:
                                 merge_precheck_failed(
                                     "Could not resolve primary merge conflicts before Ralph merge.",
-                                    "See run log (PRIMARY_PREMERGE sections). Fix git state on the primary checkout, then retry with --resume RUNNER_ID.",
+                                    "See run log (PRIMARY_PREMERGE sections). Fix git state on the primary checkout, then retry with `sponte session-resume SESSION_ID`.",
                                 )
                                 return 1
                             phase = "MERGE"
@@ -1254,7 +1249,7 @@ def run_one_cycle(
                     if mh_code == 0 and phase != "MERGE_CONFLICT":
                         merge_head_hint = (
                             "Resolve or abort the in-progress merge on the primary checkout (e.g. git merge --abort), "
-                            "then retry with --resume RUNNER_ID."
+                            "then retry with `sponte session-resume SESSION_ID`."
                         )
                         _append_diagnostic_log(
                             logf,
@@ -1419,7 +1414,7 @@ def run_one_cycle(
             )
             merge_precheck_failed(
                 f"Another Ralph runner is merging into local `{main_ref}` (or holding that merge lock) for too long.",
-                "Wait and retry with --resume RUNNER_ID, or adjust RALPH_MERGE_LOCK_TIMEOUT_SEC.",
+                "Wait and retry with `sponte session-resume SESSION_ID`, or adjust RALPH_MERGE_LOCK_TIMEOUT_SEC.",
             )
             return 1
 
@@ -1480,14 +1475,7 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
     primary = cfg.primary
 
     def _take_task_and_claim_lock(task_abs: Path) -> bool:
-        rel = task_abs.relative_to(primary).as_posix()
-        lp = task_lock_path_for_rel(primary, rel)
-        if not try_acquire_task_lock(lp):
-            return False
-        cfg.held_task_lock_path = lp
         if not _try_workspace_claim_lock(cfg, primary, task_abs):
-            release_lock(lp)
-            cfg.held_task_lock_path = None
             return False
         return True
 

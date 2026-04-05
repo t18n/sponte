@@ -42,7 +42,7 @@ def cycle_line(
     generation_id: str | None = None,
 ) -> None:
     c = get_console()
-    gen = f" · generation [cyan]{generation_id}[/cyan]" if generation_id else ""
+    gen = f" · session [cyan]{generation_id}[/cyan]" if generation_id else ""
     if max_cycles is not None:
         c.print(f"[bold][ralph][/bold] Cycle {current} of {max_cycles}{gen}")
     else:

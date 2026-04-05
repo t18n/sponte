@@ -4,6 +4,12 @@ from typer.testing import CliRunner
 
 from config.defaults import TASKS_DIR
 from ralph_focus.resume import ResumeState
+from ralph_focus.task_jobs import SessionJobStatus, TaskJobStatus, write_session_job_status, write_task_job_status
+from ralph_focus.workspace_analytics import AnalyticsSummary
+
+
+def _output(result) -> str:
+    return result.stdout + result.stderr
 
 
 def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Path) -> None:
@@ -459,3 +465,137 @@ def test_auto_focus_complete_worktree_rejects_combine_resume(monkeypatch, tmp_pa
         ],
     )
     assert result.exit_code == 1
+
+
+def test_task_resume_command_prepares_new_session_and_invokes_agent(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "prepare_task_resume", lambda *_a, **_k: ("rap-new1234", ""))
+    monkeypatch.setattr(
+        cli,
+        "_invoke_agent_minimal",
+        lambda *, workspace, resume: seen.update({"workspace": workspace, "resume": resume}),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["task-resume", "demo-abc123"])
+
+    assert result.exit_code == 0
+    assert "rap-new1234" in _output(result)
+    assert seen == {"workspace": None, "resume": "rap-new1234"}
+
+
+def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+
+    write_session_job_status(
+        tmp_path,
+        SessionJobStatus(
+            session_id="rap-1111",
+            workspace_root=str(tmp_path.resolve()),
+            active_task_id="demo-abc123",
+            rel_task=f"{TASKS_DIR}/in-progress/demo.md",
+            phase="IMPLEMENT",
+            worktree_path=str(tmp_path / "wt-demo"),
+            branch="ralph/wt-demo",
+        ),
+    )
+    write_task_job_status(
+        tmp_path,
+        TaskJobStatus(
+            task_id="demo-abc123",
+            rel_task=f"{TASKS_DIR}/in-progress/demo.md",
+            stage="in-progress",
+            owning_session_id="rap-1111",
+            worktree_path=str(tmp_path / "wt-demo"),
+            branch="ralph/wt-demo",
+            task_title="Demo task",
+        ),
+    )
+    backlog = tmp_path / TASKS_DIR / "backlog"
+    backlog.mkdir(parents=True, exist_ok=True)
+    (backlog / "queued.md").write_text("task: queued\n\n- [ ] next\n", encoding="utf-8")
+
+    runner = CliRunner()
+    status_result = runner.invoke(cli.app, ["status"])
+    session_current_result = runner.invoke(cli.app, ["session-current"])
+    task_current_result = runner.invoke(cli.app, ["task-current"])
+    session_show_result = runner.invoke(cli.app, ["session-show", "rap-1111"])
+    task_show_result = runner.invoke(cli.app, ["task-show", "demo-abc123"])
+
+    assert status_result.exit_code == 0
+    assert "Active sessions (job index): 1" in _output(status_result)
+    assert "Claimed tasks: 1" in _output(status_result)
+    assert "Backlog tasks: 1" in _output(status_result)
+    assert session_current_result.exit_code == 0
+    assert "rap-1111" in _output(session_current_result)
+    assert "demo-abc123" in _output(session_current_result)
+    assert task_current_result.exit_code == 0
+    assert "demo-abc123" in _output(task_current_result)
+    assert "rap-1111" in _output(task_current_result)
+    assert session_show_result.exit_code == 0
+    assert "active_task_id" in _output(session_show_result)
+    assert "demo-abc123" in _output(session_show_result)
+    assert task_show_result.exit_code == 0
+    assert "owning_session_id" in _output(task_show_result)
+    assert "Demo task" in _output(task_show_result)
+
+
+def test_stats_command_renders_summary_and_recent_events(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "load_summary",
+        lambda _primary: AnalyticsSummary(
+            sessions_started=2,
+            sessions_resumed=1,
+            tasks_completed=3,
+            tasks_cancelled=1,
+            tasks_review_required=1,
+            cleanup_repairs=2,
+            updated_at="2026-04-06T12:00:00Z",
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "read_recent_events",
+        lambda _primary, limit=12: [
+            {
+                "timestamp": "2026-04-06T12:00:00Z",
+                "event": "task_completed",
+                "outcome": "ok",
+                "duration_sec": 12.5,
+                "cycles": 4,
+                "session_id": "rap-1111",
+                "task_id": "demo-abc123",
+            }
+        ],
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["stats"])
+
+    assert result.exit_code == 0
+    assert "sessions_started" in _output(result)
+    assert "Recent events" in _output(result)
+    assert "demo-abc123" in _output(result)
+
+
+def test_agent_help_uses_session_language_for_resume_option() -> None:
+    from ralph_focus import cli
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["agent", "--help"])
+
+    assert result.exit_code == 0
+    assert "SESSION_ID" in result.stdout
+    assert "session-resume" in result.stdout

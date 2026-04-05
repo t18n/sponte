@@ -14,8 +14,8 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 | Command | Purpose |
 | --- | --- |
-| `agent` | Main loop: claim task, worktree, phases, merge (same flags as legacy flow; use `--resume`, `--complete-worktree`, etc.) |
-| `session-resume SESSION_ID` | Same as `agent --resume SESSION_ID` |
+| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` is the primary way to continue an interrupted session; `--resume` remains the underlying flag) |
+| `session-resume SESSION_ID` | Resume an interrupted session by id |
 | `task-resume TASK_ID` | New session id; rewrites resume for existing worktree + task |
 
 ## Lifecycle / repair

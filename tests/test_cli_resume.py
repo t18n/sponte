@@ -44,7 +44,7 @@ def test_disk_full_resume_hint_includes_resume_command() -> None:
 
     assert result is not None
     assert "disk appears full" in result
-    assert "sponte agent --resume rap-test1234" in result
+    assert "sponte session-resume rap-test1234" in result
 
 
 def test_disk_full_resume_hint_returns_none_for_other_failures() -> None:
@@ -90,7 +90,7 @@ def test_rotation_handoff_markdown_includes_resume_context() -> None:
     assert "post-step trigger, not a hard cap" in result
     assert "`80,000`" in result
     assert "`79,500`" in result
-    assert "sponte agent --resume rap-test1234" in result
+    assert "sponte session-resume rap-test1234" in result
 
 
 def test_print_rotation_handoff_inline_renders_content(monkeypatch) -> None:

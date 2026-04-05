@@ -4,11 +4,11 @@
 
 A unit of work described as a markdown file under `.sponte/tasks/`, moving between stages such as `backlog`, `in-progress`, `review-required`, and `completed`.
 
-Each active task has a stable **`task_id`** derived from the filename stem and a short hash of the task title (see `sponte task-priority` for resolved ids).
+Each active task has a stable **`task_id`** derived from the task title plus a short hash of that title (falling back to the filename stem only if the title is missing; see `sponte task-priority` for resolved ids).
 
 ## Session
 
-A **session** is one Sponte run, identified by an opaque id such as `rap-…` (also used as the resume / generation id). A session is a long-lived *lane*: over time it may process many tasks sequentially, but it may **own at most one active task at a time**.
+A **session** is one Sponte run, identified by an opaque id such as `rap-…`. A session is a long-lived *lane*: over time it may process many tasks sequentially, but it may **own at most one active task at a time**.
 
 ## Worktree
 

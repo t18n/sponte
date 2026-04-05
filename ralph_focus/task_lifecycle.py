@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from config.defaults import GIT_IDENTITY_EMAIL, GIT_IDENTITY_NAME, RESUME_SCHEMA_VERSION, TASKS_DIR
+from config.defaults import RESUME_SCHEMA_VERSION, TASKS_DIR
 from ralph_focus.git_ops import git, worktree_registered
 from ralph_focus.lockfile import release_lock
 from ralph_focus.paths import (
@@ -23,6 +23,7 @@ from ralph_focus.lockfile import _try_remove_stale_lock
 from ralph_focus.task_jobs import (
     SessionJobStatus,
     TaskJobStatus,
+    read_session_job_status,
     read_task_job_status,
     write_session_job_status,
     write_task_job_status,
@@ -38,6 +39,38 @@ def _unlink_quiet(p: Path) -> None:
         p.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _restore_task_to_backlog(repo: Path, rel_task: str) -> str:
+    rel = concrete_task_rel(repo, rel_task)
+    if task_stage(rel) != "in-progress":
+        return rel
+    src = repo / rel
+    dest_rel = task_with_stage(rel, "backlog")
+    dest = repo / dest_rel
+    if not src.exists():
+        return dest_rel if dest.exists() else rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rc, _out, _err = git(repo, "mv", rel, dest_rel)
+    if rc != 0:
+        src.rename(dest)
+    return dest_rel
+
+
+def _clear_session_active_task(repo: Path, session_id: str, *, rel_task: str, phase: str, worktree_path: str, branch: str) -> None:
+    existing = read_session_job_status(repo, session_id)
+    write_session_job_status(
+        repo,
+        SessionJobStatus(
+            session_id=session_id,
+            workspace_root=(existing.workspace_root if existing else str(repo.resolve())),
+            active_task_id="",
+            rel_task=rel_task or (existing.rel_task if existing else ""),
+            phase=phase or (existing.phase if existing else ""),
+            worktree_path=worktree_path or (existing.worktree_path if existing else ""),
+            branch=branch or (existing.branch if existing else ""),
+        ),
+    )
 
 
 def cancel_task(repo: Path, task_id: str) -> tuple[bool, str]:
@@ -58,31 +91,25 @@ def cancel_task(repo: Path, task_id: str) -> tuple[bool, str]:
     release_lock(clp)
     _unlink_quiet(clp)
 
+    new_rel = (st.rel_task or "").strip()
+    if new_rel:
+        new_rel = _restore_task_to_backlog(repo, new_rel)
+    if sess:
+        _clear_session_active_task(
+            repo,
+            sess,
+            rel_task=new_rel,
+            phase="",
+            worktree_path="",
+            branch="",
+        )
+
     wt = Path(st.worktree_path) if st.worktree_path.strip() else None
     br = (st.branch or "").strip()
     if wt is not None and wt.is_dir() and worktree_registered(repo, wt):
         git(repo, "worktree", "remove", "-f", str(wt))
     if br:
         git(repo, "branch", "-D", br)
-
-    new_rel = (st.rel_task or "").strip()
-    if new_rel:
-        abs_p = repo / new_rel
-        if abs_p.is_file() and task_stage(new_rel) == "in-progress":
-            dest_rel = task_with_stage(new_rel, "backlog")
-            (repo / dest_rel).parent.mkdir(parents=True, exist_ok=True)
-            git(repo, "mv", new_rel, dest_rel)
-            git(
-                repo,
-                "-c",
-                f"user.name={GIT_IDENTITY_NAME}",
-                "-c",
-                f"user.email={GIT_IDENTITY_EMAIL}",
-                "commit",
-                "-m",
-                f"chore(tasks): cancel {task_id} -> backlog",
-            )
-            new_rel = dest_rel
 
     write_task_job_status(
         repo,
@@ -172,9 +199,18 @@ def task_cleanup(repo: Path) -> tuple[int, list[str]]:
                 if owner:
                     clear_resume(repo, runner_id=owner)
                     clear_ralph_lock_matching_runner(repo, owner)
+                    _clear_session_active_task(
+                        repo,
+                        owner,
+                        rel_task=str(raw.get("rel_task", "")).strip(),
+                        phase="",
+                        worktree_path="",
+                        branch="",
+                    )
                 release_lock(workspace_task_claim_lock_path(repo, tid))
                 _unlink_quiet(workspace_task_claim_lock_path(repo, tid))
                 rel = str(raw.get("rel_task", "")).strip()
+                rel = _restore_task_to_backlog(repo, rel)
                 write_task_job_status(
                     repo,
                     TaskJobStatus(
@@ -225,12 +261,12 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
         return None, "task file missing in worktree"
 
     old_sess = (st.owning_session_id or "").strip()
+    prev = load_resume(repo, runner_id=old_sess) if old_sess else None
     if old_sess:
         clear_resume(repo, runner_id=old_sess)
         clear_ralph_lock_matching_runner(repo, old_sess)
 
     new_rid = f"rap-{secrets.token_hex(4)}"
-    prev = load_resume(repo, runner_id=old_sess) if old_sess else None
     logf = auto_focus_logs_dir(repo, runner_id=new_rid) / f"run-{int(time.time())}.log"
     logf.parent.mkdir(parents=True, exist_ok=True)
     logf.write_text("", encoding="utf-8")
@@ -301,6 +337,15 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
             branch=br_name,
         ),
     )
+    if old_sess:
+        _clear_session_active_task(
+            repo,
+            old_sess,
+            rel_task=rs.rel_task,
+            phase=phase,
+            worktree_path=str(wt),
+            branch=br_name,
+        )
     ws = load_workspace_settings(repo)
     meta: dict[str, Any] = {"from_session_id": old_sess} if old_sess else {}
     if prev:

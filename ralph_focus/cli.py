@@ -179,7 +179,7 @@ def _token_rotation_notice(*, rotate_threshold_tokens: int) -> str:
     return (
         "Token rotation threshold was detected after the completed step "
         f"(session now at or above {rotate_threshold_tokens:,} rotation tokens); "
-        "resume the same generation to continue from saved state."
+        "resume the same session to continue from saved state."
     )
 
 
@@ -214,10 +214,10 @@ def _rotation_handoff_markdown(
             f"- Agent steps this session: `{stats.agent_steps}`",
             "",
             "## Next step",
-            f"Resume the same generation to continue from `{resume_state.phase or 'unknown'}`:",
+            f"Resume the same session to continue from `{resume_state.phase or 'unknown'}`:",
             "",
             "```bash",
-            f"sponte agent --resume {runner_id} --plan-model auto --execute-model auto",
+            f"sponte session-resume {runner_id}",
             "```",
         ]
     )
@@ -262,8 +262,7 @@ def _disk_full_resume_hint(detail: str, *, runner_id: str) -> str | None:
         return None
     return (
         "disk appears full; free space, then resume with: "
-        f"sponte agent --resume {shlex.quote(runner_id)} "
-        "--plan-model auto --execute-model auto"
+        f"sponte session-resume {shlex.quote(runner_id)}"
     )
 
 
@@ -332,7 +331,7 @@ def _print_auto_focus_settings(
     t.add_row("Resuming prior cycle", "yes" if resuming else "no")
     if complete_worktree_mode:
         t.add_row("Orphan worktree recovery", "single cycle then exit")
-    t.add_row("Generation", runner_id)
+    t.add_row("Session id", runner_id)
     if not session_deadline_epoch:
         t.add_row(
             "Max consecutive failures (no wall limit)",
@@ -539,8 +538,8 @@ def cmd_agent(
         str | None,
         typer.Option(
             "--resume",
-            metavar="RUNNER_ID",
-            help="Generation id to resume (same as session id / app-state ralph.lock runner_id)",
+            metavar="SESSION_ID",
+            help="Session id to resume (same stored session id used by session-resume)",
         ),
     ] = None,
     complete_worktree: Annotated[
@@ -555,15 +554,15 @@ def cmd_agent(
         str | None,
         typer.Option(
             "--clear-resume",
-            metavar="RUNNER_ID",
-            help="Clear saved state for this generation id only",
+            metavar="SESSION_ID",
+            help="Clear saved state for this session id only",
         ),
     ] = None,
     runner_id: Annotated[
         str | None,
         typer.Option(
             "--runner-id",
-            help="Stable generation id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume / --complete-worktree",
+            help="Stable session id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume / --complete-worktree",
         ),
     ] = None,
     skip_preflight: Annotated[bool, typer.Option("--skip-preflight", hidden=True)] = False,
@@ -576,7 +575,7 @@ def cmd_agent(
 
     resume_runner = resume.strip() if resume else ""
     if resume is not None and not resume_runner:
-        console.print("[red]--resume requires a non-empty generation id (e.g. --resume lane-a)[/red]")
+        console.print("[red]--resume requires a non-empty session id (e.g. --resume lane-a)[/red]")
         raise typer.Exit(1)
     resume_id: str | None = resume_runner if resume_runner else None
 
@@ -598,7 +597,7 @@ def cmd_agent(
 
     clear_runner = clear_resume_id.strip() if clear_resume_id else ""
     if clear_resume_id is not None and not clear_runner:
-        console.print("[red]--clear-resume requires a non-empty generation id[/red]")
+        console.print("[red]--clear-resume requires a non-empty session id[/red]")
         raise typer.Exit(1)
     if clear_runner:
         if cwt_arg:
@@ -613,7 +612,7 @@ def cmd_agent(
         raise typer.Exit(0)
 
     if resume_id is not None and runner_id is not None:
-        console.print("[red]Do not combine --resume RUNNER_ID with --runner-id; the resume id is the generation[/red]")
+        console.print("[red]Do not combine --resume SESSION_ID with --runner-id; the resumed session already supplies the id[/red]")
         raise typer.Exit(1)
 
     if resume_id is None and not cwt_arg and not task:
@@ -643,7 +642,7 @@ def cmd_agent(
         resume_session_id, _ = pair
         loaded_resume_state = load_resume(primary, runner_id=resume_session_id)
         if loaded_resume_state is None:
-            console.print("[red]Could not load resume state for the resolved generation.[/red]")
+            console.print("[red]Could not load resume state for the resolved session.[/red]")
             raise typer.Exit(1)
         resume_id = resume_session_id
 
@@ -968,8 +967,8 @@ def cmd_agent(
         if cfg.current_wt_path and cfg.current_wt_path.is_dir() and not cleanup_on_exit:
             console.print(
                 f"[yellow]Worktree left for inspection:[/yellow] {cfg.current_wt_path}\n"
-                f"Resume with: sponte agent --resume "
-                f"{shlex.quote(runner_id_effective)} --plan-model auto --execute-model auto"
+                f"Resume with: sponte session-resume "
+                f"{shlex.quote(runner_id_effective)}"
             )
 
     _print_session_summary(
@@ -984,7 +983,7 @@ def _print_session_summary(stats: SessionStats, *, deadline_hit: bool, runner_id
     t = Table(title="Sponte session summary")
     t.add_column("Metric")
     t.add_column("Value")
-    t.add_row("Generation (resume id)", runner_id)
+    t.add_row("Session id", runner_id)
     t.add_row("Wall time (s)", f"{wall:.1f}")
     t.add_row("Cycles completed", str(stats.cycles_completed))
     t.add_row("Resume retries", str(stats.resume_retries))
@@ -1034,7 +1033,7 @@ def _cli_primary(workspace: Path | None) -> Path:
     )
 
 
-@app.command("session-resume", help="Resume a session by id (same as agent --resume).")
+@app.command("session-resume", help="Resume a session by id.")
 def cmd_session_resume(
     session_id: Annotated[str, typer.Argument(metavar="SESSION_ID")],
     workspace: Annotated[

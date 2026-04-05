@@ -202,9 +202,9 @@ def concrete_task_rel(repo: Path, arg: str) -> str:
         return normalize_task_rel(arg)
 
 
-def slugify_task_stem_for_id(stem: str) -> str:
-    """Slug from a task filename stem for ``task_id`` prefix."""
-    s = stem.strip().lower()
+def slugify_task_name_for_id(name: str) -> str:
+    """Slug from the user-facing task name/title for ``task_id`` prefix."""
+    s = name.strip().lower()
     s = re.sub(r"[^a-z0-9._-]+", "-", s)
     return s.strip("-") or "task"
 
@@ -216,10 +216,11 @@ def task_title_hash_suffix(title: str, *, length: int = 6) -> str:
 
 def compute_task_id(*, task_stem: str, task_title: str) -> str:
     """
-    ``task_id = <slugified-stem>-<6charhash(title)>``.
+    ``task_id = <slugified-task-name>-<6charhash(title)>``.
 
-    Changing the task title changes the id; stem comes from the markdown filename.
+    Changing the task title changes the id; the slug comes from the title when present.
     """
     stem = Path(task_stem).stem if task_stem.strip() else "task"
-    slug = slugify_task_stem_for_id(stem)
+    slug_source = task_title.strip() or stem
+    slug = slugify_task_name_for_id(slug_source)
     return f"{slug}-{task_title_hash_suffix(task_title)}"
