@@ -68,7 +68,7 @@ def test_rotation_handoff_markdown_includes_resume_context() -> None:
     state = ResumeState(
         primary="/repo",
         phase="IMPLEMENT",
-        logf="/home/u/.local/state/sponte/workspaces/abc/runners/rap-test1234/auto-focus/logs/run.log",
+        logf="/home/u/.local/state/sponte/workspaces/abc/runners/rap-test1234/agent/logs/run.log",
         wt_path="/repo/.sponte/worktrees/task-1234",
         rel_task=".sponte/tasks/in-progress/example.md",
         plan_rel="/home/u/.local/state/sponte/workspaces/abc/plans/example.md",
@@ -100,14 +100,14 @@ def test_print_rotation_handoff_inline_renders_content(monkeypatch) -> None:
     monkeypatch.setattr(cli, "console", Console(file=out, force_terminal=False, color_system=None))
 
     _print_rotation_handoff_inline(
-        path="/home/u/.local/state/sponte/workspaces/abc/runners/rap-test1234/auto-focus/rotation-handoff.md",
+        path="/home/u/.local/state/sponte/workspaces/abc/runners/rap-test1234/agent/rotation-handoff.md",
         content="# Rotation handoff\n\n- Current phase: `IMPLEMENT`\n",
     )
 
     rendered = out.getvalue()
     assert "Rotation handoff written" in rendered
     assert "rap-test1234" in rendered
-    assert "auto-focus" in rendered
+    assert "agent" in rendered
     assert "Current phase" in rendered
     assert "IMPLEMENT" in rendered
 

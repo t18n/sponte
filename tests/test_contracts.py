@@ -213,12 +213,12 @@ def test_run_state_store_uses_app_state_path_conventions(tmp_path: Path, monkeyp
 
     assert store.state_root() == state_root
     assert store.logs_dir(runner_id="lane-a") == (
-        state_root / "runners" / "lane-a" / "auto-focus" / "logs"
+        state_root / "runners" / "lane-a" / "agent" / "logs"
     )
     assert store.resume_file(runner_id="lane-a") == (
-        state_root / "runners" / "lane-a" / "auto-focus" / "resume.state"
+        state_root / "runners" / "lane-a" / "agent" / "resume.state"
     )
     assert store.rotation_handoff_file(runner_id="lane-a") == (
-        state_root / "runners" / "lane-a" / "auto-focus" / "rotation-handoff.md"
+        state_root / "runners" / "lane-a" / "agent" / "rotation-handoff.md"
     )
     assert store.next_task_file() == state_root / "auto-focus-next-task.txt"

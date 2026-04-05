@@ -7,8 +7,9 @@ import re
 from pathlib import Path
 
 from config.defaults import (
-    AUTO_FOCUS_SUBDIR,
+    AGENT_SESSION_SUBDIR,
     GUARDRAILS_BASENAME,
+    LEGACY_AGENT_SESSION_SUBDIR,
     LEGACY_RALPH_DATA_DIR,
     NEXT_TASK_FILENAME,
     PROGRESS_BASENAME,
@@ -51,9 +52,19 @@ def sanitize_runner_segment(runner_id: str) -> str:
     return f"h-{h}"
 
 
+def agent_session_data_dir(primary: Path, runner_id: str) -> Path:
+    """Per-session data under ``runners/<id>/agent/`` (logs, resume, handoff)."""
+    return ralph_data_dir(primary) / "runners" / sanitize_runner_segment(runner_id) / AGENT_SESSION_SUBDIR
+
+
+def legacy_agent_session_data_dir(primary: Path, runner_id: str) -> Path:
+    """Pre-rename layout: ``runners/<id>/auto-focus/`` (resume read fallback only)."""
+    return ralph_data_dir(primary) / "runners" / sanitize_runner_segment(runner_id) / LEGACY_AGENT_SESSION_SUBDIR
+
+
 def auto_focus_data_dir(primary: Path, runner_id: str) -> Path:
-    """Resume + logs under `runners/<id>/auto-focus/`."""
-    return ralph_data_dir(primary) / "runners" / sanitize_runner_segment(runner_id) / AUTO_FOCUS_SUBDIR
+    """Alias for :func:`agent_session_data_dir` (historical name)."""
+    return agent_session_data_dir(primary, runner_id)
 
 
 def auto_focus_logs_dir(root: Path, *, runner_id: str = "default") -> Path:
@@ -61,7 +72,13 @@ def auto_focus_logs_dir(root: Path, *, runner_id: str = "default") -> Path:
 
 
 def resume_file(primary: Path, *, runner_id: str = "default") -> Path:
-    return auto_focus_data_dir(primary, runner_id) / "resume.state"
+    """Path for **writing** resume state (always under ``agent/``)."""
+    return agent_session_data_dir(primary, runner_id) / "resume.state"
+
+
+def resume_file_legacy(primary: Path, *, runner_id: str = "default") -> Path:
+    """Legacy resume path under ``auto-focus/`` (read fallback)."""
+    return legacy_agent_session_data_dir(primary, runner_id) / "resume.state"
 
 
 def rotation_handoff_file(primary: Path, *, runner_id: str = "default") -> Path:

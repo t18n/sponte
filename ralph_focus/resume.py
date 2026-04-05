@@ -1,4 +1,8 @@
-"""Resume state under app state `runners/<id>/auto-focus/resume.state` (shell export format)."""
+"""Resume state under app state ``runners/<id>/agent/resume.state`` (shell export format).
+
+Legacy installs may still have ``runners/<id>/auto-focus/resume.state``; :func:`load_resume`
+reads that path when the new location is absent.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from config.defaults import LEGACY_RALPH_DATA_DIR, RESUME_SCHEMA_VERSION
-from ralph_focus.paths import auto_focus_data_dir, plan_file_for_task, ralph_data_dir, resume_file
+from ralph_focus.paths import (
+    auto_focus_data_dir,
+    plan_file_for_task,
+    ralph_data_dir,
+    resume_file,
+    resume_file_legacy,
+)
 from ralph_focus.tasks import normalize_task_rel
 
 
@@ -94,6 +104,7 @@ def clear_resume(
     runner_id: str = "default",
 ) -> None:
     resume_file(primary, runner_id=runner_id).unlink(missing_ok=True)
+    resume_file_legacy(primary, runner_id=runner_id).unlink(missing_ok=True)
 
 
 def _parse_export_line(line: str) -> tuple[str, str] | None:
@@ -131,7 +142,10 @@ def load_resume(
 ) -> ResumeState | None:
     path = resume_file(primary, runner_id=runner_id)
     if not path.is_file():
-        return None
+        leg = resume_file_legacy(primary, runner_id=runner_id)
+        if not leg.is_file():
+            return None
+        path = leg
     raw: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         p = _parse_export_line(line)

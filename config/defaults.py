@@ -42,7 +42,10 @@ LEGACY_RALPH_DATA_DIR: str = ".agents/ralph/data"
 LEGACY_TASKS_DIR: str = ".agents/tasks"
 
 # --- Runtime under app state (see ralph_focus.app_state_paths); not a repo-relative path ---
-AUTO_FOCUS_SUBDIR: str = "auto-focus"
+# Per-session logs/resume live under ``runners/<id>/agent/``. Legacy installs used ``auto-focus/``;
+# resume load still falls back there (see ``ralph_focus.resume``).
+AGENT_SESSION_SUBDIR: str = "agent"
+LEGACY_AGENT_SESSION_SUBDIR: str = "auto-focus"
 NEXT_TASK_FILENAME: str = "auto-focus-next-task.txt"
 
 # --- Resume schema ---
