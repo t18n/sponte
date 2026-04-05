@@ -1,0 +1,203 @@
+"""Resume state under `.agents/ralph/data/runners/<id>/auto-focus/resume.state` (shell export format)."""
+
+from __future__ import annotations
+
+import shlex
+from dataclasses import dataclass
+from pathlib import Path
+
+from config.defaults import RALPH_DATA_DIR, RESUME_SCHEMA_VERSION, TASKS_DIR
+from ralph_focus.paths import auto_focus_data_dir, resume_file
+
+
+@dataclass
+class ResumeState:
+    schema_version: int = RESUME_SCHEMA_VERSION
+    primary: str = ""
+    phase: str = "PLAN"
+    logf: str = ""
+    wt_path: str = ""
+    branch: str = ""
+    main_ref: str = ""
+    rel_task: str = ""
+    plan_rel: str = ""
+    implement_next: int = 1
+    improve_i: int = 1
+    improve_j: int = 0
+    conflict_next: int = 1
+    cycles_done: int = 0
+    max_cycles: str = ""
+    task_arg: str = ""
+    agent_kind: str = "cursor"
+    plan_model: str = ""
+    agent_model: str = ""
+    allow_agent_pick: str = "false"
+    session_deadline_epoch: str = ""
+    total_tokens: int = 0
+    no_progress_loops: int = 0
+    token_warning_emitted: str = "false"
+
+    def to_exports(self) -> dict[str, str]:
+        return {
+            "R_RESUME_SCHEMA_VERSION": str(self.schema_version),
+            "R_RESUME_PRIMARY": self.primary,
+            "R_RESUME_PHASE": self.phase,
+            "R_RESUME_LOGF": self.logf,
+            "R_RESUME_WT_PATH": self.wt_path,
+            "R_RESUME_BRANCH": self.branch,
+            "R_RESUME_MAIN_REF": self.main_ref,
+            "R_RESUME_REL_TASK": self.rel_task,
+            "R_RESUME_PLAN_REL": self.plan_rel,
+            "R_RESUME_IMPLEMENT_NEXT": str(self.implement_next),
+            "R_RESUME_IMPROVE_I": str(self.improve_i),
+            "R_RESUME_IMPROVE_J": str(self.improve_j),
+            "R_RESUME_CONFLICT_NEXT": str(self.conflict_next),
+            "R_RESUME_CYCLES_DONE": str(self.cycles_done),
+            "R_RESUME_MAX_CYCLES": self.max_cycles,
+            "R_RESUME_TASK_ARG": self.task_arg,
+            "R_RESUME_AGENT_KIND": self.agent_kind,
+            "R_RESUME_PLAN_MODEL": self.plan_model,
+            "R_RESUME_AGENT_MODEL": self.agent_model,
+            "R_RESUME_ALLOW_AGENT_PICK": self.allow_agent_pick,
+            "R_RESUME_SESSION_DEADLINE_EPOCH": self.session_deadline_epoch,
+            "R_RESUME_TOTAL_TOKENS": str(self.total_tokens),
+            "R_RESUME_NO_PROGRESS_LOOPS": str(self.no_progress_loops),
+            "R_RESUME_TOKEN_WARNING_EMITTED": self.token_warning_emitted,
+        }
+
+
+def write_resume(
+    primary: Path,
+    state: ResumeState,
+    *,
+    runner_id: str = "default",
+) -> None:
+    path = resume_file(primary, runner_id=runner_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# ralph resume (generated; do not hand-edit)"]
+    for k, v in state.to_exports().items():
+        lines.append(f"export {k}={shlex.quote(v)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def clear_resume(
+    primary: Path,
+    *,
+    runner_id: str = "default",
+) -> None:
+    resume_file(primary, runner_id=runner_id).unlink(missing_ok=True)
+
+
+def _parse_export_line(line: str) -> tuple[str, str] | None:
+    line = line.strip()
+    if not line.startswith("export "):
+        return None
+    rest = line[7:].strip()
+    if "=" not in rest:
+        return None
+    key, _, val = rest.partition("=")
+    key = key.strip()
+    try:
+        parsed = shlex.split(val, posix=True)
+    except ValueError:
+        return None
+    if len(parsed) != 1:
+        return None
+    return key, parsed[0]
+
+
+def _parse_int(raw: dict[str, str], key: str, default: int) -> int | None:
+    value = raw.get(key)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def load_resume(
+    primary: Path,
+    *,
+    runner_id: str = "default",
+) -> ResumeState | None:
+    path = resume_file(primary, runner_id=runner_id)
+    if not path.is_file():
+        return None
+    raw: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        p = _parse_export_line(line)
+        if p:
+            raw[p[0]] = p[1]
+    ver = _parse_int(raw, "R_RESUME_SCHEMA_VERSION", 0)
+    if ver is None:
+        return None
+    if ver not in (1, 2):
+        return None
+    if raw.get("R_RESUME_PRIMARY", "") != str(primary.resolve()):
+        return None
+    if not raw.get("R_RESUME_WT_PATH") or not raw.get("R_RESUME_REL_TASK") or not raw.get("R_RESUME_LOGF"):
+        return None
+    rel_task = raw.get("R_RESUME_REL_TASK", "")
+    if rel_task.startswith(".tasks/"):
+        rel_task = f"{TASKS_DIR}/{rel_task.removeprefix('.tasks/')}"
+    plan_rel = raw.get("R_RESUME_PLAN_REL", "")
+    if plan_rel.startswith(".ralph/data/"):
+        plan_rel = f"{RALPH_DATA_DIR}/{plan_rel.removeprefix('.ralph/data/')}"
+    implement_next = _parse_int(raw, "R_RESUME_IMPLEMENT_NEXT", 1)
+    improve_i = _parse_int(raw, "R_RESUME_IMPROVE_I", 1)
+    improve_j = _parse_int(raw, "R_RESUME_IMPROVE_J", 0)
+    conflict_next = _parse_int(raw, "R_RESUME_CONFLICT_NEXT", 1)
+    cycles_done = _parse_int(raw, "R_RESUME_CYCLES_DONE", 0)
+    total_tokens = _parse_int(raw, "R_RESUME_TOTAL_TOKENS", 0)
+    no_progress_loops = _parse_int(raw, "R_RESUME_NO_PROGRESS_LOOPS", 0)
+    numeric_values = (
+        implement_next,
+        improve_i,
+        improve_j,
+        conflict_next,
+        cycles_done,
+        total_tokens,
+        no_progress_loops,
+    )
+    if any(value is None for value in numeric_values):
+        return None
+    return ResumeState(
+        schema_version=ver,
+        primary=raw.get("R_RESUME_PRIMARY", ""),
+        phase=raw.get("R_RESUME_PHASE", "PLAN"),
+        logf=raw.get("R_RESUME_LOGF", ""),
+        wt_path=raw.get("R_RESUME_WT_PATH", ""),
+        branch=raw.get("R_RESUME_BRANCH", ""),
+        main_ref=raw.get("R_RESUME_MAIN_REF", ""),
+        rel_task=rel_task,
+        plan_rel=plan_rel,
+        implement_next=implement_next,
+        improve_i=improve_i,
+        improve_j=improve_j,
+        conflict_next=conflict_next,
+        cycles_done=cycles_done,
+        max_cycles=raw.get("R_RESUME_MAX_CYCLES", ""),
+        task_arg=raw.get("R_RESUME_TASK_ARG", ""),
+        agent_kind=raw.get("R_RESUME_AGENT_KIND", "cursor"),
+        plan_model=raw.get("R_RESUME_PLAN_MODEL", ""),
+        agent_model=raw.get("R_RESUME_AGENT_MODEL", ""),
+        allow_agent_pick=raw.get("R_RESUME_ALLOW_AGENT_PICK", "false"),
+        session_deadline_epoch=raw.get("R_RESUME_SESSION_DEADLINE_EPOCH", ""),
+        total_tokens=total_tokens,
+        no_progress_loops=no_progress_loops,
+        token_warning_emitted=raw.get("R_RESUME_TOKEN_WARNING_EMITTED", "false"),
+    )
+
+
+def resume_path(
+    primary: Path,
+    *,
+    runner_id: str = "default",
+) -> Path:
+    return resume_file(primary, runner_id=runner_id)
+
+
+def runner_data_root(primary: Path, runner_id: str) -> Path:
+    """Parent of logs/resume for this runner (for docs / introspection)."""
+    return auto_focus_data_dir(primary, runner_id)

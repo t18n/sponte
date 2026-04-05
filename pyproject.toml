@@ -1,0 +1,35 @@
+[project]
+name = "sponte"
+version = "0.1.0"
+description = "Standalone task harness CLI powered by Ralph core"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.0.0",
+]
+
+[project.scripts]
+sponte = "ralph_focus.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ralph_focus", "config"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"prompts" = "prompts"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "ralph_focus",
+  "config",
+  "prompts",
+  "README.md",
+  "pyproject.toml",
+]
