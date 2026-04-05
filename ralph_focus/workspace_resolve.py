@@ -79,13 +79,19 @@ def _interactive_execution_settings(*, primary: Path, console: Console) -> None:
         except (TypeError, ValueError):
             mpr = 20
 
-        err = probe_init_harness_selection(
-            primary,
-            harness_id=harness_field,
-            plan_model=pm,
-            execute_model=em,
-            custom=custom_cfg,
-        )
+        with console.status("[cyan]Validating harness and models…[/cyan]", spinner="dots") as st:
+
+            def _probe_status(msg: str) -> None:
+                st.update(status=f"[cyan]{msg}[/cyan]")
+
+            err = probe_init_harness_selection(
+                primary,
+                harness_id=harness_field,
+                plan_model=pm,
+                execute_model=em,
+                custom=custom_cfg,
+                status=_probe_status,
+            )
         if err:
             console.print(f"[red]Validation failed:[/red] {err}")
             console.print("[yellow]Try another harness or model string.[/yellow]")
@@ -264,7 +270,8 @@ def bootstrap_workspace_with_prompt(
         default="sponte",
     )
     try:
-        init_sponte_workspace(primary, source=source, trunk_branch=trunk_raw.strip() or None)
+        with console.status("[cyan]Creating Sponte workspace layout…[/cyan]", spinner="dots"):
+            init_sponte_workspace(primary, source=source, trunk_branch=trunk_raw.strip() or None)
     except (OSError, RuntimeError) as exc:
         console.print(f"[red]Init failed:[/red] {exc}")
         raise typer.Exit(1) from exc
