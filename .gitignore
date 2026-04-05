@@ -9,3 +9,5 @@ __pycache__/
 .sponte/worktrees/
 .sponte/guardrails.md
 .sponte/progress.md
+
+.cursor/hooks/state
