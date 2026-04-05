@@ -7,6 +7,20 @@ from ralph_focus.paths import plan_file_for_task, resume_file
 from ralph_focus.resume import ResumeState, load_resume, write_resume
 
 
+def test_resume_round_trips_task_id(tmp_path: Path) -> None:
+    state = ResumeState(
+        primary=str(tmp_path.resolve()),
+        logf=str(tmp_path / "run.log"),
+        wt_path=str(tmp_path / "wt"),
+        rel_task=f"{TASKS_DIR}/in-progress/example.md",
+        task_id="example-a1b2c3",
+    )
+    write_resume(tmp_path, state, runner_id="lane-b")
+    loaded = load_resume(tmp_path, runner_id="lane-b")
+    assert loaded is not None
+    assert loaded.task_id == "example-a1b2c3"
+
+
 def test_resume_round_trips_token_and_progress_counters(tmp_path: Path) -> None:
     state = ResumeState(
         primary=str(tmp_path.resolve()),

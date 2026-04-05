@@ -46,7 +46,7 @@ AUTO_FOCUS_SUBDIR: str = "auto-focus"
 NEXT_TASK_FILENAME: str = "auto-focus-next-task.txt"
 
 # --- Resume schema ---
-RESUME_SCHEMA_VERSION: int = 2
+RESUME_SCHEMA_VERSION: int = 3
 
 # --- Same-repo concurrent auto-focus (cooperative locks under data/locks/) ---
 MERGE_LOCK_TIMEOUT_SEC: float = float(os.environ.get("RALPH_MERGE_LOCK_TIMEOUT_SEC", "900"))

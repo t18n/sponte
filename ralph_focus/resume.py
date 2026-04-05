@@ -39,6 +39,7 @@ class ResumeState:
     token_warning_emitted: str = "false"
     # Generation id for CLI --resume / locks; may differ from runners/<segment>/ when segment is hashed.
     resume_runner_id: str = ""
+    task_id: str = ""
 
     def to_exports(self) -> dict[str, str]:
         return {
@@ -67,6 +68,7 @@ class ResumeState:
             "R_RESUME_NO_PROGRESS_LOOPS": str(self.no_progress_loops),
             "R_RESUME_TOKEN_WARNING_EMITTED": self.token_warning_emitted,
             "R_RESUME_RUNNER_ID": self.resume_runner_id,
+            "R_RESUME_TASK_ID": self.task_id,
         }
 
 
@@ -138,7 +140,7 @@ def load_resume(
     ver = _parse_int(raw, "R_RESUME_SCHEMA_VERSION", 0)
     if ver is None:
         return None
-    if ver not in (1, 2):
+    if ver not in (1, 2, 3):
         return None
     if raw.get("R_RESUME_PRIMARY", "") != str(primary.resolve()):
         return None
@@ -196,6 +198,7 @@ def load_resume(
         no_progress_loops=no_progress_loops,
         token_warning_emitted=raw.get("R_RESUME_TOKEN_WARNING_EMITTED", "false"),
         resume_runner_id=raw.get("R_RESUME_RUNNER_ID", ""),
+        task_id=raw.get("R_RESUME_TASK_ID", ""),
     )
 
 
