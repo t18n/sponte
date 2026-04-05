@@ -85,6 +85,24 @@ def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
     assert again.policy.verification_required is False
 
 
+def test_init_harness_probe_skips_when_env_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SPONTE_INIT_SKIP_HARNESS_PROBE", "1")
+    from ralph_focus.init_harness_probe import probe_init_harness_selection
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    assert (
+        probe_init_harness_selection(
+            root,
+            harness_id="cursor",
+            plan_model="auto",
+            execute_model="auto",
+            custom=None,
+        )
+        is None
+    )
+
+
 def test_known_workspaces_registry_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "st"))
     from ralph_focus.workspaces_registry import load_known_workspaces, register_workspace, save_known_workspaces
@@ -180,6 +198,7 @@ def test_init_cli_repairs_partial_workspace(monkeypatch: pytest.MonkeyPatch, tmp
     from ralph_focus import cli
     from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
+    monkeypatch.setenv("SPONTE_INIT_SKIP_HARNESS_PROBE", "1")
     root = tmp_path / "repo"
     root.mkdir()
     _git_init_with_commit(root)
@@ -240,6 +259,7 @@ def test_resolve_trunk_branch_cli_override(tmp_path: Path, monkeypatch: pytest.M
 def test_init_cli_initializes_workspace_without_running_cycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from ralph_focus import cli
 
+    monkeypatch.setenv("SPONTE_INIT_SKIP_HARNESS_PROBE", "1")
     seen: dict[str, object] = {"run_one_cycle": 0}
     root = tmp_path / "repo"
     root.mkdir()

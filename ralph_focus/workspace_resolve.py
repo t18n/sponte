@@ -2,20 +2,114 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 from dataclasses import replace
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
+from config.defaults import DEFAULT_EXECUTE_MODEL, DEFAULT_PLAN_MODEL
+
 from ralph_focus.git_ops import git_primary_checkout_root
-from ralph_focus.workspace_settings import load_workspace_settings, save_workspace_settings
+from ralph_focus.workspace_settings import (
+    CustomHarnessConfig,
+    WorkspacePolicy,
+    load_workspace_settings,
+    save_workspace_settings,
+)
 from ralph_focus.interactive_setup import resolve_choice_index
 from ralph_focus.workspace_init import init_sponte_workspace
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 from ralph_focus.workspaces_registry import load_known_workspaces, register_workspace
+
+BUILTIN_HARNESS_IDS: tuple[str, ...] = ("cursor", "claude", "codex", "droid", "oz", "warp", "amp")
+
+
+def _interactive_execution_settings(*, primary: Path, console: Console) -> None:
+    """Prompt for harness/models, probe, then write ``.sponte/settings.json``."""
+    from ralph_focus.init_harness_probe import probe_init_harness_selection
+
+    if os.environ.get("SPONTE_INIT_SKIP_HARNESS_PROBE", "").lower() in ("1", "true", "yes"):
+        return
+
+    while True:
+        table = Table(title="Default harness (headless CLI)")
+        table.add_column("#")
+        table.add_column("Harness")
+        for idx, hid in enumerate(BUILTIN_HARNESS_IDS, start=1):
+            table.add_row(str(idx), hid)
+        table.add_row("c", "custom (your CLI on PATH)")
+        console.print(table)
+        choice = Prompt.ask("Choose harness", default="1").strip().lower()
+        custom_cfg: CustomHarnessConfig | None = None
+        harness_field = ""
+        if choice in ("c", "custom"):
+            harness_field = "custom"
+            exe = Prompt.ask("Executable name (on PATH)").strip()
+            if not exe:
+                console.print("[red]Executable is required for custom harness.[/red]")
+                continue
+            args_raw = Prompt.ask("Fixed args before prompt (shlex, optional)", default="").strip()
+            probe_raw = Prompt.ask(
+                "Probe command (shlex, optional, e.g. `mycli --version`)",
+                default="",
+            ).strip()
+            args_t = tuple(shlex.split(args_raw)) if args_raw else ()
+            probe_t = tuple(shlex.split(probe_raw)) if probe_raw else ()
+            custom_cfg = CustomHarnessConfig(executable=exe, args=args_t, probe=probe_t)
+        else:
+            try:
+                n = int(choice)
+                if n < 1 or n > len(BUILTIN_HARNESS_IDS):
+                    raise IndexError
+                harness_field = BUILTIN_HARNESS_IDS[n - 1]
+            except (ValueError, IndexError):
+                console.print(f"[red]Invalid choice; enter 1–{len(BUILTIN_HARNESS_IDS)} or c.[/red]")
+                continue
+
+        pm = Prompt.ask("Plan model", default=DEFAULT_PLAN_MODEL).strip() or DEFAULT_PLAN_MODEL
+        em = Prompt.ask("Execute model", default=DEFAULT_EXECUTE_MODEL).strip() or DEFAULT_EXECUTE_MODEL
+        mpr_raw = IntPrompt.ask("Max phase rounds (backpressure)", default=20)
+        try:
+            mpr = max(1, int(mpr_raw))
+        except (TypeError, ValueError):
+            mpr = 20
+
+        err = probe_init_harness_selection(
+            primary,
+            harness_id=harness_field,
+            plan_model=pm,
+            execute_model=em,
+            custom=custom_cfg,
+        )
+        if err:
+            console.print(f"[red]Validation failed:[/red] {err}")
+            console.print("[yellow]Try another harness or model string.[/yellow]")
+            continue
+
+        cur = load_workspace_settings(primary)
+        new_policy = WorkspacePolicy(
+            max_phase_rounds=mpr,
+            verification_required=cur.policy.verification_required,
+            merge_required=cur.policy.merge_required,
+        )
+        save_workspace_settings(
+            primary,
+            replace(
+                cur,
+                harness=harness_field,
+                plan_model=pm,
+                execute_model=em,
+                custom_harness=custom_cfg if harness_field == "custom" else None,
+                policy=new_policy,
+            ),
+        )
+        console.print("[green]Saved workspace execution settings to[/green] `.sponte/settings.json`")
+        return
 
 
 def resolve_git_repo_root(
@@ -175,6 +269,7 @@ def bootstrap_workspace_with_prompt(
         console.print(f"[red]Init failed:[/red] {exc}")
         raise typer.Exit(1) from exc
     console.print(f"[green]Initialized Sponte tasks under[/green] {primary / '.sponte'}")
+    _interactive_execution_settings(primary=primary, console=console)
 
 
 def resolve_trunk_branch_ref(primary: Path, *, cli_override: str | None) -> str:

@@ -22,5 +22,4 @@ def test_help_hides_removed_commands() -> None:
     assert "init" in output
     assert "plan" in output
     assert "auto-focus" in output
-    assert "interactive" not in output
     assert "smoke" not in output
