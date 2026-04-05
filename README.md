@@ -82,21 +82,38 @@ The workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) bu
 sponte init
 
 # Create or refine backlog tasks in an initialized workspace
-sponte plan --workspace /absolute/path/to/workspace
+sponte task-plan --workspace /absolute/path/to/workspace
+
+# Inspect resolved `.sponte/settings.json` defaults
+sponte config show --workspace /absolute/path/to/workspace
 
 # Override the workspace trunk branch for one run
-sponte auto-focus --workspace /absolute/path/to/workspace --trunk-branch main
+sponte agent --workspace /absolute/path/to/workspace --trunk-branch main
 
-# Start an auto-focus cycle for one explicit task
-sponte auto-focus --workspace /absolute/path/to/workspace .sponte/tasks/backlog/example-task.md
+# Start an agent cycle for one explicit task
+sponte agent --workspace /absolute/path/to/workspace .sponte/tasks/backlog/example-task.md
+
+# Resume the same session (lane)
+sponte session-resume rap-abcd1234 --workspace /absolute/path/to/workspace
+
+# Resume an interrupted task in a new session
+sponte task-resume my-task-abc123 --workspace /absolute/path/to/workspace
+
+# Inspect task/session state (repo-local under `.sponte/jobs/`)
+sponte status --workspace /absolute/path/to/workspace
+sponte task-list
+sponte task-current
+sponte session-current
 
 # Recover one orphaned worktree and exit
-sponte auto-focus --workspace /absolute/path/to/workspace --complete-worktree "/absolute/path/to/workspace/.sponte/worktrees/raf-example-1234"
+sponte agent --workspace /absolute/path/to/workspace --complete-worktree "/absolute/path/to/workspace/.sponte/worktrees/wt-…"
 
 # Worktree maintenance
 sponte worktree-prune-clean --workspace /absolute/path/to/workspace
 sponte worktree-remove --workspace /absolute/path/to/workspace
 ```
+
+More detail: [docs/index.md](docs/index.md).
 
 ## Workspace Model
 
@@ -105,6 +122,7 @@ Workspace-owned files live under `workspace/.sponte/`:
 - `.sponte/settings.json` stores workspace settings such as the default trunk branch and worktree root.
 - `.sponte/guardrails.md` stores durable workspace guidance.
 - `.sponte/tasks/` is the canonical task store.
+- `.sponte/jobs/` holds a **repo-local** index of tasks and sessions (`tasks/<task_id>/`, `sessions/<session_id>/`) you can inspect with normal tools.
 - `.sponte/worktrees/` is the default worktree root.
 
 Git ignore rules:
@@ -140,11 +158,11 @@ It will:
 4. set the default trunk branch to `sponte` unless you choose another name
 5. ensure the local trunk branch exists
 
-After initialization, use `sponte plan` to add or refine backlog tasks before starting the first `auto-focus` cycle.
+After initialization, use `sponte task-plan` to add or refine backlog tasks before starting the first `sponte agent` cycle.
 
 ## Planning Flow
 
-`sponte plan` works only in an initialized workspace.
+`sponte task-plan` works only in an initialized workspace.
 
 It will:
 
@@ -155,7 +173,17 @@ It will:
 
 ## Recovery Flow
 
-`sponte auto-focus --complete-worktree <path>` uses saved Sponte runtime state to recover an orphaned worktree, resume exactly one cycle for that worktree, and then exit.
+`sponte agent --complete-worktree <path>` uses saved Sponte runtime state to recover an orphaned worktree, resume exactly one cycle for that worktree, and then exit.
+
+## Positioning
+
+Sponte is a **local orchestration layer**: it coordinates markdown tasks, git worktrees, and **official harness CLIs** in headless mode. It is not an IDE, editor, or diff/review replacement. Use your normal editor, `git`, and diff tools to inspect `.sponte/jobs/` and worktrees.
+
+Sponte intentionally does **not** embed a custom agent runtime, so it can track upstream harness changes and paid subscriptions (Cursor, Claude, Codex, etc.) without re‑implementing them.
+
+## Provider usage
+
+External APIs can still impose billing, rate limits, or policy risk. Sponte cannot guarantee protection from provider-side surprises. Prefer conservative defaults, avoid on‑demand spending unless you accept that tradeoff, and review harness output and git diffs before merging.
 
 ## AI Rules
 
@@ -171,9 +199,9 @@ Sponte runs agent work from the target workspace and prompts agents to read work
 
 ## Philosophy
 
-Sponte is built around a simple idea: keep task state explicit, keep workspace rules close to the code, and let an agent run one focused unattended cycle at a time. It prefers Markdown task queues, isolated git worktrees, and resumable local state over hidden orchestration.
+Sponte is built around a simple idea: keep task state explicit under `.sponte/`, keep workspace rules close to the code, and let a harness run one focused unattended **session** at a time. It prefers Markdown task queues, isolated git worktrees, and resumable local state over hidden orchestration.
 
-There is intentionally no built-in `--parallel N` mode. If you want multiple runs at once, start multiple `sponte` sessions from different terminals. That design keeps each run legible and recoverable as its own session, avoids hiding scheduler behavior behind one parent process, and lets cooperative locks handle shared repo coordination only where needed.
+There is intentionally no built-in `--parallel N` mode. If you want multiple runs at once, start multiple `sponte agent` sessions from different terminals (use distinct `--runner-id` / `RALPH_RUNNER_ID` when needed). Cooperative locks coordinate shared-repo access without a daemon.
 
 ## Ralph Lineage
 
