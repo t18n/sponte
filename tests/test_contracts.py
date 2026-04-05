@@ -169,13 +169,12 @@ def test_file_task_store_wraps_existing_task_helpers(tmp_path: Path) -> None:
 
 
 def test_project_workspace_wraps_git_helpers(monkeypatch, tmp_path: Path) -> None:
-    from ralph_focus import contracts
     from ralph_focus.contracts import RepoProjectWorkspace
 
     seen: dict[str, Path] = {}
 
-    def fake_default_branch(root: Path) -> str:
-        seen["default_branch"] = root
+    def fake_trunk(primary: Path, *, cli_override: str | None) -> str:
+        seen["default_branch"] = primary
         return "main"
 
     def fake_registered(root: Path, wt: Path) -> bool:
@@ -183,11 +182,16 @@ def test_project_workspace_wraps_git_helpers(monkeypatch, tmp_path: Path) -> Non
         seen["registered_wt"] = wt
         return True
 
-    monkeypatch.setattr(contracts, "default_branch_ref", fake_default_branch)
-    monkeypatch.setattr(contracts, "worktree_registered", fake_registered)
+    monkeypatch.setattr(
+        "ralph_focus.workspace_resolve.resolve_trunk_branch_ref",
+        fake_trunk,
+    )
+    monkeypatch.setattr("ralph_focus.contracts.worktree_registered", fake_registered)
 
     workspace = RepoProjectWorkspace(tmp_path)
-    wt = tmp_path / ".worktrees" / "demo"
+    from config.defaults import WORKTREE_BASE_DIR
+
+    wt = tmp_path / WORKTREE_BASE_DIR / "demo"
 
     assert workspace.root == tmp_path
     assert workspace.default_branch() == "main"
@@ -199,19 +203,22 @@ def test_project_workspace_wraps_git_helpers(monkeypatch, tmp_path: Path) -> Non
     }
 
 
-def test_run_state_store_uses_existing_path_conventions(tmp_path: Path) -> None:
+def test_run_state_store_uses_app_state_path_conventions(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "sponte-app-state"))
+    from ralph_focus.app_state_paths import workspace_runtime_root
     from ralph_focus.contracts import FileSystemRunStateStore
 
     store = FileSystemRunStateStore(tmp_path)
+    state_root = workspace_runtime_root(tmp_path)
 
-    assert store.state_root() == tmp_path / ".agents" / "ralph" / "data"
+    assert store.state_root() == state_root
     assert store.logs_dir(runner_id="lane-a") == (
-        tmp_path / ".agents" / "ralph" / "data" / "runners" / "lane-a" / "auto-focus" / "logs"
+        state_root / "runners" / "lane-a" / "auto-focus" / "logs"
     )
     assert store.resume_file(runner_id="lane-a") == (
-        tmp_path / ".agents" / "ralph" / "data" / "runners" / "lane-a" / "auto-focus" / "resume.state"
+        state_root / "runners" / "lane-a" / "auto-focus" / "resume.state"
     )
     assert store.rotation_handoff_file(runner_id="lane-a") == (
-        tmp_path / ".agents" / "ralph" / "data" / "runners" / "lane-a" / "auto-focus" / "rotation-handoff.md"
+        state_root / "runners" / "lane-a" / "auto-focus" / "rotation-handoff.md"
     )
-    assert store.next_task_file() == tmp_path / ".agents" / "ralph" / "data" / "auto-focus-next-task.txt"
+    assert store.next_task_file() == state_root / "auto-focus-next-task.txt"

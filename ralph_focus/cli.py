@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 import shlex
 import signal
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +31,6 @@ from config.defaults import TASKS_DIR
 from ralph_focus.contracts import get_harness
 from ralph_focus.cycle import AutoFocusConfig, ProgressMode, run_one_cycle
 from ralph_focus.failure_detection import FailureKind
-from ralph_focus.git_ops import git_toplevel
 from ralph_focus.interactive_setup import (
     auto_focus_entry_choices,
     build_exec_args,
@@ -47,12 +46,23 @@ from ralph_focus.ralph_session_lock import (
     write_ralph_lock,
 )
 from ralph_focus.resume import ResumeState, clear_resume as resume_clear_state
-from ralph_focus.resume import load_resume, resume_path
+from ralph_focus.resume import (
+    list_recoverable_resumes,
+    load_resume,
+    resolve_runner_for_worktree,
+    resume_path,
+)
 from ralph_focus.session_stats import SessionStats
-from ralph_focus.tasks import count_checklist, priority_task_paths_pending, task_label
+from ralph_focus.tasks import count_checklist, priorities_file, priority_task_paths_pending, task_label
 from ralph_focus.time_parse import format_seconds_human, parse_duration_to_seconds
 from ralph_focus.token_rotation import rotation_policy_from_overrides
 from ralph_focus.worktree_cli import worktree_prune_clean, worktree_remove_interactive
+from ralph_focus.workspace_resolve import (
+    ensure_tasks_layout_with_prompt,
+    persist_trunk_branch_override,
+    resolve_git_repo_root,
+    resolve_primary_workspace,
+)
 
 app = typer.Typer(help="Sponte — standalone task harness powered by Ralph core.", no_args_is_help=True)
 console = Console(stderr=True)
@@ -214,6 +224,7 @@ def _print_auto_focus_settings(
     task_arg: str,
     resuming: bool,
     runner_id: str,
+    complete_worktree_mode: bool = False,
 ) -> None:
     t = Table(title="Sponte auto-focus — session settings")
     t.add_column("Setting")
@@ -252,6 +263,8 @@ def _print_auto_focus_settings(
     t.add_row("Allow agent task pick", "yes" if allow_agent_pick else "no")
     t.add_row("Explicit task", task_arg if task_arg else f"(from {TASKS_DIR}/priorities.md)")
     t.add_row("Resuming prior cycle", "yes" if resuming else "no")
+    if complete_worktree_mode:
+        t.add_row("Orphan worktree recovery", "single cycle then exit")
     t.add_row("Generation", runner_id)
     if not session_deadline_epoch:
         t.add_row(
@@ -261,12 +274,8 @@ def _print_auto_focus_settings(
     console.print(Panel(t, border_style="cyan"))
 
 
-def _ensure_repo() -> Path:
-    root = git_toplevel()
-    if root is None:
-        console.print("[red]Not inside a git repository.[/red]")
-        raise typer.Exit(1)
-    return root
+def _cli_allows_prompts() -> bool:
+    return sys.stdin.isatty()
 
 
 def _pick_interactive_choice(title: str, choices: list[tuple[str, str]]) -> str:
@@ -290,7 +299,7 @@ def task_list_choice_paths(primary: Path, pending: list[Path]) -> list[str]:
 
 
 def _pick_task_from_task_list(primary: Path) -> str | None:
-    pri_file = primary / TASKS_DIR / "priorities.md"
+    pri_file = priorities_file(primary)
     pending = priority_task_paths_pending(pri_file, primary)
     if not pending:
         console.print(f"[yellow]No pending tasks found in {pri_file}.[/yellow]")
@@ -312,8 +321,18 @@ def _pick_task_from_task_list(primary: Path) -> str | None:
 
 
 @app.command("interactive")
-def cmd_interactive() -> None:
-    primary = _ensure_repo()
+def cmd_interactive(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root (optional)"),
+    ] = None,
+) -> None:
+    primary = resolve_git_repo_root(
+        workspace,
+        console=console,
+        interactive=True,
+    )
+    exec_workspace = primary
     mode = _pick_interactive_choice(
         "Sponte interactive setup",
         [(choice.id, choice.label) for choice in mode_choices()],
@@ -327,23 +346,68 @@ def cmd_interactive() -> None:
         )
         if entry == "resume":
             value = Prompt.ask("Generation id to resume")
+        elif entry == "complete-worktree":
+            rows = list_recoverable_resumes(primary)
+            if not rows:
+                value = Prompt.ask("Worktree path")
+            else:
+                table = Table(title="Recoverable worktrees (saved resume state)")
+                table.add_column("#")
+                table.add_column("Worktree")
+                table.add_column("Phase")
+                table.add_column("Generation")
+                for idx, (rid, st) in enumerate(rows, 1):
+                    table.add_row(str(idx), st.wt_path, st.phase, rid)
+                console.print(table)
+                raw_idx = IntPrompt.ask(
+                    f"Choose 1–{len(rows)} or 0 to enter a worktree path",
+                    default=1,
+                )
+                if raw_idx == 0:
+                    value = Prompt.ask("Worktree path")
+                else:
+                    try:
+                        idx = resolve_choice_index(choice_count=len(rows), raw_index=raw_idx)
+                    except ValueError as exc:
+                        console.print(f"[red]{exc}[/red]")
+                        raise typer.Exit(1) from exc
+                    value = rows[idx][1].wt_path
+            value = str(Path(value).expanduser().resolve())
         elif entry == "specific-task":
+            exec_workspace = resolve_primary_workspace(
+                primary,
+                console=console,
+                interactive=True,
+            )
             value = Prompt.ask("Task path", default=f"{TASKS_DIR}/backlog/")
         elif entry == "task-list":
-            value = _pick_task_from_task_list(primary)
+            exec_workspace = resolve_primary_workspace(
+                primary,
+                console=console,
+                interactive=True,
+            )
+            value = _pick_task_from_task_list(exec_workspace)
             if value is None:
                 raise typer.Exit(1)
     try:
-        args = build_exec_args(mode=mode, entry=entry, value=value)
+        args = build_exec_args(mode=mode, entry=entry, value=value, workspace=str(exec_workspace))
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    os.execv(sys.executable, [sys.executable, str(primary), *args])
+    os.execv(sys.executable, [sys.executable, "-m", "ralph_focus.cli", *args])
 
 
 @app.command("auto-focus")
 def cmd_auto_focus(
-    task: Annotated[str | None, typer.Argument(help="Optional .agents/tasks/… path")] = None,
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root (run from anywhere)"),
+    ] = None,
+    trunk_branch: Annotated[
+        str | None,
+        typer.Option("--trunk-branch", help="Override workspace trunk branch for worktrees/merges"),
+    ] = None,
+    task: Annotated[str | None, typer.Argument(help="Optional .sponte/tasks/… path")] = None,
     agent: Annotated[
         str,
         typer.Option("--agent", help="cursor | claude | codex | droid | oz | warp | amp"),
@@ -389,7 +453,15 @@ def cmd_auto_focus(
         typer.Option(
             "--resume",
             metavar="RUNNER_ID",
-            help="Generation id to resume (same as session id / .agents/ralph/ralph.lock runner_id)",
+            help="Generation id to resume (same as session id / app-state ralph.lock runner_id)",
+        ),
+    ] = None,
+    complete_worktree: Annotated[
+        str | None,
+        typer.Option(
+            "--complete-worktree",
+            metavar="PATH",
+            help="Resume from saved state for this worktree path; run exactly one cycle and exit",
         ),
     ] = None,
     clear_resume_id: Annotated[
@@ -404,12 +476,16 @@ def cmd_auto_focus(
         str | None,
         typer.Option(
             "--runner-id",
-            help="Stable generation id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not used with --resume",
+            help="Stable generation id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume / --complete-worktree",
         ),
     ] = None,
     skip_preflight: Annotated[bool, typer.Option("--skip-preflight", hidden=True)] = False,
 ) -> None:
-    primary = _ensure_repo()
+    primary = resolve_git_repo_root(
+        workspace,
+        console=console,
+        interactive=_cli_allows_prompts(),
+    )
 
     resume_runner = resume.strip() if resume else ""
     if resume is not None and not resume_runner:
@@ -417,11 +493,30 @@ def cmd_auto_focus(
         raise typer.Exit(1)
     resume_id: str | None = resume_runner if resume_runner else None
 
+    cwt_arg = ""
+    if complete_worktree is not None:
+        cwt_arg = complete_worktree.strip()
+        if not cwt_arg:
+            console.print("[red]--complete-worktree requires a non-empty worktree path[/red]")
+            raise typer.Exit(1)
+        if resume_id is not None:
+            console.print("[red]Do not combine --complete-worktree with --resume[/red]")
+            raise typer.Exit(1)
+        if task:
+            console.print("[red]Do not pass a task path with --complete-worktree[/red]")
+            raise typer.Exit(1)
+        if runner_id is not None:
+            console.print("[red]Do not combine --complete-worktree with --runner-id[/red]")
+            raise typer.Exit(1)
+
     clear_runner = clear_resume_id.strip() if clear_resume_id else ""
     if clear_resume_id is not None and not clear_runner:
         console.print("[red]--clear-resume requires a non-empty generation id[/red]")
         raise typer.Exit(1)
     if clear_runner:
+        if cwt_arg:
+            console.print("[red]Do not combine --complete-worktree with --clear-resume[/red]")
+            raise typer.Exit(1)
         if resume_id is not None:
             console.print("[red]Do not combine --resume with --clear-resume[/red]")
             raise typer.Exit(1)
@@ -434,14 +529,43 @@ def cmd_auto_focus(
         console.print("[red]Do not combine --resume RUNNER_ID with --runner-id; the resume id is the generation[/red]")
         raise typer.Exit(1)
 
+    if resume_id is None and not cwt_arg:
+        initialized = ensure_tasks_layout_with_prompt(
+            primary,
+            console=console,
+            interactive=_cli_allows_prompts(),
+            trunk_branch=trunk_branch,
+        )
+        if initialized:
+            console.print(
+                "[yellow]Workspace tasks were initialized. Review and commit the new `.sponte` files, "
+                "then rerun `sponte auto-focus`.[/yellow]"
+            )
+            raise typer.Exit(0)
+
+    loaded_resume_state: ResumeState | None = None
+    if cwt_arg:
+        wt_resolved = Path(cwt_arg).expanduser().resolve()
+        pair = resolve_runner_for_worktree(primary, wt_resolved)
+        if pair is None:
+            console.print(
+                "[red]No unique saved resume state for that worktree under this workspace.[/red]"
+            )
+            raise typer.Exit(1)
+        resume_session_id, _ = pair
+        loaded_resume_state = load_resume(primary, runner_id=resume_session_id)
+        if loaded_resume_state is None:
+            console.print("[red]Could not load resume state for the resolved generation.[/red]")
+            raise typer.Exit(1)
+        resume_id = resume_session_id
+
     runner_id_effective = resume_id if resume_id is not None else _effective_runner_id(runner_id)
 
     if resume_id is not None and task:
-        console.print("[red]Do not pass a task path with --resume[/red]")
+        console.print("[red]Do not pass a task path when resuming (--resume / --complete-worktree)[/red]")
         raise typer.Exit(1)
 
-    loaded_resume_state: ResumeState | None = None
-    if resume_id is not None:
+    if resume_id is not None and not cwt_arg:
         loaded_resume_state = load_resume(
             primary,
             runner_id=runner_id_effective,
@@ -482,12 +606,14 @@ def cmd_auto_focus(
 
     harness = get_harness(effective_agent)
 
+    complete_worktree_mode = bool(cwt_arg)
+
     mc = max_cycles
-    if once:
+    if once or complete_worktree_mode:
         mc = 1
 
     duration_sec: int | None
-    if unlimited or once:
+    if unlimited or once or complete_worktree_mode:
         duration_sec = None
     elif max_duration:
         duration_sec = parse_duration_to_seconds(max_duration)
@@ -508,6 +634,7 @@ def cmd_auto_focus(
         cleanup_on_exit=cleanup_on_exit,
         task_arg=effective_task_arg,
         runner_id=runner_id_effective,
+        trunk_branch_override=trunk_branch,
         rotate_policy=rotation_policy_from_overrides(
             rotate_threshold=rotate_threshold_tokens,
             warn_threshold=warn_threshold_tokens,
@@ -518,18 +645,22 @@ def cmd_auto_focus(
     max_cycles_str = str(mc) if mc is not None else ""
 
     cycles_done = 0
+    invocation_cycles_done = 0
     use_resume_flag = resume_id is not None
     resume_state_for_cycle = loaded_resume_state
     if resume_id is not None:
         st = loaded_resume_state
         assert st is not None
         cycles_done = st.cycles_done
-        cfg.session_deadline_epoch = compute_resumed_deadline(
-            stored_deadline_epoch=st.session_deadline_epoch,
-            default_deadline_epoch=deadline_epoch,
-            extend_duration=extend_duration or "",
-            now_epoch=time.time(),
-        )
+        if complete_worktree_mode:
+            cfg.session_deadline_epoch = ""
+        else:
+            cfg.session_deadline_epoch = compute_resumed_deadline(
+                stored_deadline_epoch=st.session_deadline_epoch,
+                default_deadline_epoch=deadline_epoch,
+                extend_duration=extend_duration or "",
+                now_epoch=time.time(),
+            )
         use_resume_flag = True
     else:
         cfg.session_deadline_epoch = deadline_epoch
@@ -570,11 +701,13 @@ def cmd_auto_focus(
         task_arg=effective_task_arg,
         resuming=use_resume_flag,
         runner_id=runner_id_effective,
+        complete_worktree_mode=complete_worktree_mode,
     )
 
     try:
         while True:
-            if mc is not None and cycles_done >= mc:
+            cycles_done_for_limit = invocation_cycles_done if complete_worktree_mode else cycles_done
+            if mc is not None and cycles_done_for_limit >= mc:
                 stats.exit_reason = "max_cycles"
                 break
             if cfg.session_deadline_epoch:
@@ -607,7 +740,12 @@ def cmd_auto_focus(
                     generation_id=runner_id_effective,
                 )
 
-            rc = run_one_cycle(cfg, use_resume=use_resume_flag, resume_state=resume_state_for_cycle)
+            rc = run_one_cycle(
+                cfg,
+                use_resume=use_resume_flag,
+                resume_state=resume_state_for_cycle,
+                stop_after_plan=False,
+            )
             use_resume_flag = False
             resume_state_for_cycle = None
             if rc == 2:
@@ -690,6 +828,7 @@ def cmd_auto_focus(
                 raise typer.Exit(rc)
             consecutive_cycle_errors = 0
             cycles_done += 1
+            invocation_cycles_done += 1
             cfg.task_arg = ""
     except typer.Exit:
         raise
@@ -736,18 +875,36 @@ def _print_session_summary(stats: SessionStats, *, deadline_hit: bool, runner_id
 
 @app.command("worktree-prune-clean")
 def cmd_prune(
-    workspace: Annotated[Path, typer.Argument()] = Path("."),
     force: Annotated[bool, typer.Option("--force")] = False,
+    workspace_opt: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+    path: Annotated[Path | None, typer.Argument()] = None,
 ) -> None:
-    ws = workspace.resolve()
+    pick = workspace_opt or path
+    ws = resolve_git_repo_root(
+        pick,
+        console=console,
+        interactive=_cli_allows_prompts(),
+    )
     raise typer.Exit(worktree_prune_clean(ws, force=force, console=console))
 
 
 @app.command("worktree-remove")
 def cmd_remove(
-    workspace: Annotated[Path, typer.Argument()] = Path("."),
+    workspace_opt: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root"),
+    ] = None,
+    path: Annotated[Path | None, typer.Argument()] = None,
 ) -> None:
-    ws = workspace.resolve()
+    pick = workspace_opt or path
+    ws = resolve_git_repo_root(
+        pick,
+        console=console,
+        interactive=_cli_allows_prompts(),
+    )
     raise typer.Exit(worktree_remove_interactive(ws, console=console))
 
 
@@ -759,5 +916,39 @@ def cmd_smoke() -> None:
     console.print("[green]smoke OK[/green]")
 
 
+@app.command("plan")
+def cmd_plan(
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Git checkout root (run from anywhere)"),
+    ] = None,
+    trunk_branch: Annotated[
+        str | None,
+        typer.Option("--trunk-branch", help="Override the default trunk branch stored in workspace settings"),
+    ] = None,
+) -> None:
+    primary = resolve_git_repo_root(
+        workspace,
+        console=console,
+        interactive=_cli_allows_prompts(),
+    )
+    initialized = ensure_tasks_layout_with_prompt(
+        primary,
+        console=console,
+        interactive=_cli_allows_prompts(),
+        trunk_branch=trunk_branch,
+    )
+    if trunk_branch is not None and trunk_branch.strip():
+        persist_trunk_branch_override(primary, trunk_branch)
+    if initialized:
+        console.print("[green]Workspace initialized. Review the generated `.sponte/tasks` files and commit when ready.[/green]")
+    else:
+        console.print("[green]Workspace tasks already look valid.[/green]")
+
+
 def main() -> None:
     app()
+
+
+if __name__ == "__main__":
+    main()

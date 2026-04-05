@@ -6,9 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from config.defaults import TASKS_DIR
 from ralph_focus.failure_detection import FailureClassification, ProgressSnapshot, classify_agent_failure
-from ralph_focus.git_ops import default_branch_ref, worktree_registered
+from ralph_focus.git_ops import worktree_registered
 from ralph_focus.paths import (
     auto_focus_logs_dir,
     next_task_file,
@@ -17,7 +16,7 @@ from ralph_focus.paths import (
     rotation_handoff_file,
 )
 from ralph_focus.strategies import AgentStrategy, get_strategy
-from ralph_focus.tasks import normalize_task_path, priority_task_paths_pending, task_has_pending, task_snapshot
+from ralph_focus.tasks import normalize_task_path, priorities_file, priority_task_paths_pending, task_has_pending, task_snapshot
 
 _STREAM_JSON_STRATEGY_IDS = frozenset({"cursor", "droid"})
 _KNOWN_NON_STREAM_JSON_STRATEGY_IDS = frozenset({"claude", "codex", "amp", "oz", "warp"})
@@ -213,8 +212,7 @@ class FileTaskStore:
         return normalize_task_path(repo, task_arg)
 
     def priority_tasks(self, repo: Path) -> list[Path]:
-        priorities_file = repo / TASKS_DIR / self.priorities_filename
-        return priority_task_paths_pending(priorities_file, repo)
+        return priority_task_paths_pending(priorities_file(repo, self.priorities_filename), repo)
 
     def task_snapshot(self, task_path: Path) -> TaskInfo:
         snap = task_snapshot(task_path)
@@ -231,7 +229,9 @@ class RepoProjectWorkspace:
     root: Path
 
     def default_branch(self) -> str:
-        return default_branch_ref(self.root)
+        from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
+
+        return resolve_trunk_branch_ref(self.root, cli_override=None)
 
     def is_worktree_registered(self, worktree_path: Path) -> bool:
         return worktree_registered(self.root, worktree_path)

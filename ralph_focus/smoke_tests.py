@@ -9,7 +9,14 @@ from rich.console import Console
 
 from config.commands import VERIFY_COMMANDS, verify_commands_markdown
 from config.defaults import NO_PROGRESS_LOOPS_MAX
-from config.defaults import RALPH_DATA_DIR, ROTATE_THRESHOLD_TOKENS, TASKS_DIR
+from config.defaults import (
+    LEGACY_RALPH_DATA_DIR,
+    ROTATE_THRESHOLD_TOKENS,
+    SPONTE_GUARDRAILS_PATH,
+    SPONTE_PROGRESS_PATH,
+    TASKS_DIR,
+    WORKTREE_BASE_DIR,
+)
 from ralph_focus.contracts import FileSystemRunStateStore, FileTaskStore, get_harness
 from ralph_focus.cycle import (
     derive_warn_threshold_tokens,
@@ -27,7 +34,7 @@ from ralph_focus.git_message import lint_commit_message
 from ralph_focus.resume import ResumeState, clear_resume, load_resume, write_resume
 from ralph_focus.stream_json import summarize_stream_file
 from ralph_focus.lockfile import LockHeldError, acquire_lock, release_lock
-from ralph_focus.paths import merge_into_branch_lock_path, ralph_lock_path, resume_file
+from ralph_focus.paths import merge_into_branch_lock_path, plan_file_for_task, ralph_data_dir, ralph_lock_path, resume_file
 from ralph_focus.ralph_session_lock import (
     clear_ralph_lock_matching_runner,
     finalize_ralph_lock_if_session_idle,
@@ -139,7 +146,7 @@ def _test_resume_roundtrip() -> None:
             branch="b",
             main_ref="main",
             rel_task=f"{TASKS_DIR}/x.md",
-            plan_rel=f"{RALPH_DATA_DIR}/plans/x.md",
+            plan_rel=str(plan_file_for_task(root, "x")),
             implement_next=2,
             improve_i=1,
             improve_j=0,
@@ -169,7 +176,7 @@ def _test_resume_runner_partition() -> None:
             branch="b",
             main_ref="main",
             rel_task=f"{TASKS_DIR}/x.md",
-            plan_rel=f"{RALPH_DATA_DIR}/plans/x.md",
+            plan_rel=str(plan_file_for_task(root, "x")),
             implement_next=1,
             improve_i=1,
             improve_j=0,
@@ -188,7 +195,7 @@ def _test_resume_runner_partition() -> None:
             branch="c",
             main_ref="main",
             rel_task=f"{TASKS_DIR}/y.md",
-            plan_rel=f"{RALPH_DATA_DIR}/plans/y.md",
+            plan_rel=str(plan_file_for_task(root, "y")),
             implement_next=2,
             improve_i=1,
             improve_j=0,
@@ -360,7 +367,13 @@ def _test_primary_precheck_classify() -> None:
     r = merge_precheck_classify_porcelain(f"UU apps/app/foo.ts\n", merge_head=False)
     assert r.kind == PrimaryPrecheckKind.CONFLICT_DIRTY
 
-    r = merge_precheck_classify_porcelain(f" M {RALPH_DATA_DIR}/logs/x\n", merge_head=False)
+    r = merge_precheck_classify_porcelain(f" M {LEGACY_RALPH_DATA_DIR}/logs/x\n", merge_head=False)
+    assert r.kind == PrimaryPrecheckKind.CLEAN
+
+    r = merge_precheck_classify_porcelain(
+        f"?? {WORKTREE_BASE_DIR}/raf-demo\n?? {SPONTE_GUARDRAILS_PATH}\n?? {SPONTE_PROGRESS_PATH}\n",
+        merge_head=False,
+    )
     assert r.kind == PrimaryPrecheckKind.CLEAN
 
     r = merge_precheck_classify_porcelain("x", merge_head=False, status_failed=True)
@@ -385,5 +398,5 @@ def _test_contracts_boundary() -> None:
         assert task_store.has_pending(task) is True
 
         run_state = FileSystemRunStateStore(root)
-        assert run_state.state_root() == root / RALPH_DATA_DIR
+        assert run_state.state_root() == ralph_data_dir(root)
         assert run_state.resume_file(runner_id="smoke").name == "resume.state"

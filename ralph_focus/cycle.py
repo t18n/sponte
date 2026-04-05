@@ -28,7 +28,6 @@ from config.defaults import (
     IMPLEMENT_ROUNDS_MAX,
     IMPROVE_IMPLEMENT_MAX,
     NO_PROGRESS_LOOPS_MAX,
-    RALPH_DATA_DIR,
     RESUME_SCHEMA_VERSION,
     ROTATE_THRESHOLD_TOKENS,
     ROTATE_WARN_THRESHOLD_TOKENS,
@@ -39,7 +38,8 @@ from ralph_focus.contracts import FailureContext, Harness, RunRequest, get_harne
 from ralph_focus.failure_detection import FailureKind, ProgressSnapshot
 from ralph_focus.phase_policy import PLANNER_PHASES, phase_model_for
 from ralph_focus.git_message import truncate_subject
-from ralph_focus.git_ops import default_branch_ref, git, worktree_registered
+from ralph_focus.git_ops import git, worktree_registered
+from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
 from ralph_focus.lockfile import release_lock
 from ralph_focus.parallel_locks import (
     LockWaitTimeoutError,
@@ -51,13 +51,16 @@ from ralph_focus.paths import (
     agent_pick_lock_path,
     auto_focus_logs_dir,
     base_sha_file,
+    base_task_file,
     next_task_file,
     plan_file_for_task,
     plans_dir,
     ralph_data_dir,
+    readable_base_sha_file,
     rotation_handoff_file,
     selection_lock_path,
     task_lock_path_for_rel,
+    worktrees_base,
 )
 from ralph_focus.primary_precheck import (
     PrimaryPrecheckKind,
@@ -73,16 +76,21 @@ from ralph_focus.progress import (
     step_done,
     task_block,
 )
-from ralph_focus.prompts import load_prompt, substitute
+from ralph_focus.prompts import render_prompt
 from ralph_focus.resume import ResumeState, clear_resume, load_resume, write_resume
 from ralph_focus.session_stats import SessionStats, _usage_rotation_tokens
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
 from ralph_focus.tasks import (
+    concrete_task_rel,
     count_checklist,
     normalize_task_path,
+    normalize_task_rel,
+    priorities_file,
     priority_task_paths_pending,
     task_has_pending,
     task_label,
+    task_stage,
+    task_with_stage,
 )
 
 ProgressMode = Literal["off", "on", "full"]
@@ -235,6 +243,7 @@ class AutoFocusConfig:
     last_agent_error_detail: str = ""
     resume_handoff: str = ""
     resume_handoff_pending: bool = False
+    trunk_branch_override: str | None = None
 
     def _run_agent(
         self,
@@ -296,8 +305,9 @@ class AutoFocusConfig:
         return rc
 
     def _sub(self, name: str, rel_task: str, plan_rel: str) -> str:
-        prompt_body = substitute(
-            load_prompt(name),
+        prompt_body = render_prompt(
+            name,
+            primary=self.primary,
             task_rel=rel_task,
             plan_rel=plan_rel,
             verify_commands=verify_commands_markdown(),
@@ -469,11 +479,20 @@ def _run_non_task_phase_agent(
     return 0
 
 
+def _teardown_plan_only_worktree(cfg: AutoFocusConfig, wt_path: Path, br_name: str, primary: Path) -> None:
+    _release_task_lock(cfg)
+    if wt_path.is_dir():
+        git(primary, "worktree", "remove", "-f", str(wt_path))
+    git(primary, "branch", "-D", br_name)
+    cfg.current_wt_path = None
+
+
 def run_one_cycle(
     cfg: AutoFocusConfig,
     *,
     use_resume: bool,
     resume_state: ResumeState | None = None,
+    stop_after_plan: bool = False,
 ) -> int:
     """
     Returns 0 success, 1 error, 2 no actionable task, 3 rotate session.
@@ -584,9 +603,9 @@ def run_one_cycle(
 
         slug = _slug_from_stem(stem)
         shortid = secrets.token_hex(2)
-        wt_path = primary / ".worktrees" / f"raf-{slug}-{shortid}"
+        wt_path = worktrees_base(primary) / f"raf-{slug}-{shortid}"
         br_name = f"ralph/auto-focus-{slug}-{shortid}"
-        main_ref = default_branch_ref(primary)
+        main_ref = resolve_trunk_branch_ref(primary, cli_override=cfg.trunk_branch_override)
 
         oc, dc = count_checklist(task_abs)
         label = task_label(task_abs)
@@ -604,14 +623,15 @@ def run_one_cycle(
         cfg.resume_handoff = ""
         cfg.resume_handoff_pending = False
 
-        _record_base(wt_path, task_rel)
+        _record_base(primary, wt_path, task_rel)
         claimed = _claim_task_in_worktree(wt_path, task_rel, logf)
         if claimed is None:
             _release_task_lock(cfg)
             return 1
         rel_task = claimed
-        plan_rel = plan_file_for_task(wt_path, Path(rel_task).stem).relative_to(wt_path).as_posix()
-        plans_dir(wt_path).mkdir(parents=True, exist_ok=True)
+        plan_path = plan_file_for_task(primary, Path(rel_task).stem)
+        plan_rel = plan_path.resolve().as_posix()
+        plans_dir(primary).mkdir(parents=True, exist_ok=True)
 
         phase = "PLAN"
         implement_next = 1
@@ -649,7 +669,15 @@ def run_one_cycle(
             label="PLAN",
         )
         if rc == 1:
+            if stop_after_plan:
+                _release_task_lock(cfg)
             return rc
+        if stop_after_plan:
+            if rc == 3:
+                _teardown_plan_only_worktree(cfg, wt_path, br_name, primary)
+                return 3
+            _teardown_plan_only_worktree(cfg, wt_path, br_name, primary)
+            return 0
         phase = "IMPLEMENT"
         implement_next = 1
         _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
@@ -770,7 +798,7 @@ def run_one_cycle(
         )
         if rc == 1:
             return rc
-        _auto_finalize_task_branch(wt_path, rel_task)
+        _auto_finalize_task_branch(primary, wt_path, rel_task)
         phase = "PRIORITIES"
         _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
         if rc == 3:
@@ -874,7 +902,7 @@ def run_one_cycle(
                 elif pre_state.kind != PrimaryPrecheckKind.CLEAN:
                     _append_diagnostic_log(
                         logf,
-                        "Merge precheck: primary not clean (outside Ralph data dir)",
+                        "Merge precheck: primary not clean (outside Sponte-ignored paths)",
                         pre_state.detail or pre_state.kind.value,
                     )
                     merge_precheck_warning(
@@ -934,7 +962,7 @@ def run_one_cycle(
                             )
                     else:
                         merge_precheck_failed(
-                            f"Primary has local changes outside {RALPH_DATA_DIR}/; commit or discard them, then retry.",
+                            "Primary has local changes outside Sponte-ignored paths; commit or discard them, then retry.",
                             pre_state.detail,
                         )
                         return 1
@@ -1097,6 +1125,7 @@ def _persist(
         total_tokens=cfg.stats.rotation_tokens(),
         no_progress_loops=cfg.no_progress_loops,
         token_warning_emitted="true" if cfg.token_warning_emitted else "false",
+        resume_runner_id=cfg.runner_id,
     )
     write_resume(
         cfg.primary,
@@ -1126,7 +1155,7 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
             return (2, None)
         return (0, p)
 
-    pri_file = primary / TASKS_DIR / "priorities.md"
+    pri_file = priorities_file(primary)
     sel_lp = selection_lock_path(primary)
     try:
         acquire_lock_blocking(sel_lp, timeout_sec=SELECTION_LOCK_TIMEOUT_SEC)
@@ -1170,17 +1199,15 @@ def _agent_pick_backlog_task(cfg: AutoFocusConfig) -> Path | None:
         )
         / "agent-pick.log"
     )
-    body = load_prompt("agent_pick_task")
+    body = render_prompt("agent_pick_task", primary=primary, task_rel="", plan_rel="")
     _append_phase_log(logf, "AGENT_PICK_TASK")
     if cfg._run_agent(primary, cfg.execute_model, body, logf, "AGENT_PICK_TASK") != 0:
         return None
     if not nf.is_file():
         return None
     line = nf.read_text(encoding="utf-8", errors="replace").splitlines()[0].strip()
-    line = line.removeprefix("./")
-    if line.startswith(".tasks/"):
-        line = f"{TASKS_DIR}/{line.removeprefix('.tasks/')}"
-    if not line.startswith(f"{TASKS_DIR}/backlog/"):
+    line = concrete_task_rel(primary, line)
+    if task_stage(line) != "backlog":
         return None
     abs_p = primary / line
     if not abs_p.is_file() or not task_has_pending(abs_p):
@@ -1188,24 +1215,22 @@ def _agent_pick_backlog_task(cfg: AutoFocusConfig) -> Path | None:
     return abs_p
 
 
-def _record_base(wt: Path, task_rel: str) -> None:
-    ralph_data = ralph_data_dir(wt)
+def _record_base(primary: Path, wt: Path, task_rel: str) -> None:
+    ralph_data = ralph_data_dir(primary)
     ralph_data.mkdir(parents=True, exist_ok=True)
     code, out, _ = git(wt, "rev-parse", "HEAD")
     if code == 0:
-        (ralph_data / "auto-focus-base-sha").write_text(out.strip(), encoding="utf-8")
-    (ralph_data / "auto-focus-base-task").write_text(task_rel + "\n", encoding="utf-8")
+        base_sha_file(primary).write_text(out.strip(), encoding="utf-8")
+    base_task_file(primary).write_text(task_rel + "\n", encoding="utf-8")
 
 
 def _claim_task_in_worktree(wt: Path, rel: str, logf: Path) -> str | None:
-    if rel.startswith(".tasks/"):
-        rel = f"{TASKS_DIR}/{rel.removeprefix('.tasks/')}"
-    backlog_p = f"{TASKS_DIR}/backlog/"
-    if not rel.startswith(backlog_p):
+    rel = concrete_task_rel(wt, rel)
+    if task_stage(rel) != "backlog":
         return rel
     name = Path(rel).name
-    dest = f"{TASKS_DIR}/in-progress/{name}"
-    (wt / TASKS_DIR / "in-progress").mkdir(parents=True, exist_ok=True)
+    dest = task_with_stage(rel, "in-progress")
+    (wt / dest).parent.mkdir(parents=True, exist_ok=True)
     src = wt / rel
     if not src.is_file():
         return None
@@ -1228,8 +1253,8 @@ def _claim_task_in_worktree(wt: Path, rel: str, logf: Path) -> str | None:
     return dest
 
 
-def _auto_finalize_task_branch(wt: Path, rel_task: str) -> None:
-    sha_path = base_sha_file(wt)
+def _auto_finalize_task_branch(primary: Path, wt: Path, rel_task: str) -> None:
+    sha_path = readable_base_sha_file(primary)
     if not sha_path.is_file():
         return
     base_sha = sha_path.read_text(encoding="utf-8").strip()
@@ -1288,7 +1313,7 @@ def _resolve_primary_precheck_conflicts(
         )
         _append_phase_log(logf, f"PRIMARY_PREMERGE_RESOLUTION_{r}")
         cfg.stats.merge_conflict_rounds += 1
-        body = substitute(load_prompt("primary_precheck_merge_conflict"), task_rel="", plan_rel="")
+        body = render_prompt("primary_precheck_merge_conflict", primary=cfg.primary, task_rel="", plan_rel="")
         rc = _run_non_task_phase_agent(
             cfg,
             cwd=primary,
@@ -1360,7 +1385,7 @@ def _resolve_merge_with_agent(
     primary = cfg.primary
     while r < cfg.conflict_rounds_max:
         r += 1
-        body = substitute(load_prompt("merge_conflict"), task_rel="", plan_rel="")
+        body = render_prompt("merge_conflict", primary=cfg.primary, task_rel="", plan_rel="")
         _persist(
             cfg,
             logf,
@@ -1410,17 +1435,15 @@ def _resolve_merge_with_agent(
 
 
 def _move_completed_on_primary(primary: Path, rel: str) -> None:
-    if rel.startswith(".tasks/"):
-        rel = f"{TASKS_DIR}/{rel.removeprefix('.tasks/')}"
-    in_p = f"{TASKS_DIR}/in-progress/"
-    if not rel.startswith(in_p):
+    rel = concrete_task_rel(primary, rel)
+    if task_stage(rel) != "in-progress":
         return
     p = primary / rel
     if not p.is_file() or task_has_pending(p):
         return
     name = Path(rel).name
-    dest = f"{TASKS_DIR}/completed/{name}"
-    (primary / TASKS_DIR / "completed").mkdir(parents=True, exist_ok=True)
+    dest = task_with_stage(rel, "completed")
+    (primary / dest).parent.mkdir(parents=True, exist_ok=True)
     git(primary, "mv", rel, dest)
     msg = truncate_subject(f"complete {name}", prefix="chore(tasks): ", max_total=50)
     git(

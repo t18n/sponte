@@ -1,10 +1,11 @@
 import shutil
 from pathlib import Path
 
+from config.defaults import TASKS_DIR
 from ralph_focus.contracts import AvailabilityReport, FailureContext, HarnessCapabilities, RunRequest, RunResult
 from ralph_focus.cycle import AutoFocusConfig, run_one_cycle
 from ralph_focus.failure_detection import FailureKind, classify_agent_failure
-from ralph_focus.paths import rotation_handoff_file
+from ralph_focus.paths import plan_file_for_task, rotation_handoff_file
 from ralph_focus.resume import ResumeState
 
 
@@ -38,12 +39,9 @@ def _write_resume_task(tmp_path: Path) -> tuple[Path, Path, Path]:
     wt_path.mkdir()
     logf = tmp_path / "run.log"
     logf.write_text("", encoding="utf-8")
-    task = wt_path / ".agents" / "tasks" / "in-progress" / "example.md"
+    task = wt_path / TASKS_DIR / "in-progress" / "example.md"
     task.parent.mkdir(parents=True, exist_ok=True)
     task.write_text('task: "Example"\n- [ ] item\n', encoding="utf-8")
-    plan = wt_path / ".agents" / "ralph" / "data" / "plans" / "example.plan.md"
-    plan.parent.mkdir(parents=True, exist_ok=True)
-    plan.write_text("", encoding="utf-8")
     return wt_path, logf, task
 
 
@@ -56,8 +54,8 @@ def _base_resume_state(tmp_path: Path, phase: str) -> ResumeState:
         wt_path=str(wt_path),
         branch="branch",
         main_ref="main",
-        rel_task=".agents/tasks/in-progress/example.md",
-        plan_rel=".agents/ralph/data/plans/example.plan.md",
+        rel_task=f"{TASKS_DIR}/in-progress/example.md",
+        plan_rel=str(plan_file_for_task(tmp_path, "example")),
         implement_next=1,
         improve_i=1,
         improve_j=0,
@@ -129,7 +127,7 @@ def test_wrap_rotation_finalizes_and_advances_before_exit(monkeypatch, tmp_path:
     monkeypatch.setattr(cycle, "_run_phase_agent", lambda *args, **kwargs: 3)
     monkeypatch.setattr(cycle, "_persist", lambda _cfg, *_args: persisted.append(_args[6]))
 
-    def fake_finalize(_wt_path: Path, _rel_task: str) -> None:
+    def fake_finalize(_primary: Path, _wt_path: Path, _rel_task: str) -> None:
         nonlocal finalized
         finalized = True
 

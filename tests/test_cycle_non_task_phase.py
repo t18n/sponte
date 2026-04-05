@@ -3,8 +3,10 @@ from pathlib import Path
 
 import pytest
 
+from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
 from ralph_focus.contracts import AvailabilityReport, FailureContext, HarnessCapabilities, RunRequest, RunResult
-from ralph_focus.cycle import AutoFocusConfig, _run_non_task_phase_agent
+from ralph_focus.cycle import AutoFocusConfig, _agent_pick_backlog_task, _run_non_task_phase_agent
+from ralph_focus.paths import plan_file_for_task
 from ralph_focus.failure_detection import FailureKind, classify_agent_failure
 
 
@@ -188,8 +190,7 @@ def test_primary_premerge_returns_error_when_commit_no_edit_fails(monkeypatch: p
 
     monkeypatch.setattr(cycle, "git", fake_git)
     monkeypatch.setattr(cycle, "primary_merge_precheck_state", lambda _primary: _State())
-    monkeypatch.setattr(cycle, "substitute", lambda prompt, **_: prompt)
-    monkeypatch.setattr(cycle, "load_prompt", lambda _name: "prompt")
+    monkeypatch.setattr(cycle, "render_prompt", lambda _name, **_: "prompt")
     monkeypatch.setattr(cycle, "_persist", lambda *args, **kwargs: None)
     monkeypatch.setattr(cycle, "_append_phase_log", lambda *args, **kwargs: None)
 
@@ -199,8 +200,8 @@ def test_primary_premerge_returns_error_when_commit_no_edit_fails(monkeypatch: p
         tmp_path,
         "branch",
         "main",
-        ".agents/tasks/in-progress/example.md",
-        ".agents/ralph/data/plan.md",
+        f"{TASKS_DIR}/in-progress/example.md",
+        str(plan_file_for_task(tmp_path, "plan")),
         1,
         1,
         0,
@@ -208,3 +209,133 @@ def test_primary_premerge_returns_error_when_commit_no_edit_fails(monkeypatch: p
     )
 
     assert rc == 1
+
+
+def test_move_completed_on_primary_moves_task_and_commits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from ralph_focus import cycle
+
+    rel = f"{TASKS_DIR}/in-progress/example.md"
+    task_path = tmp_path / rel
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text('task: "Example"\n- [x] done\n', encoding="utf-8")
+
+    git_calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def fake_git(cwd: Path, *args: str) -> tuple[int, str, str]:
+        git_calls.append((cwd, args))
+        return 0, "", ""
+
+    monkeypatch.setattr(cycle, "git", fake_git)
+
+    cycle._move_completed_on_primary(tmp_path, rel)
+
+    assert git_calls[0] == (
+        tmp_path,
+        ("mv", rel, f"{TASKS_DIR}/completed/example.md"),
+    )
+    assert git_calls[1][0] == tmp_path
+    assert git_calls[1][1][-2:] == ("-m", "chore(tasks): complete example.md")
+
+
+def test_claim_task_in_worktree_preserves_legacy_task_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from ralph_focus import cycle
+
+    logf = tmp_path / "claim.log"
+    legacy_rel = f"{LEGACY_TASKS_DIR}/backlog/example.md"
+    legacy_src = tmp_path / legacy_rel
+    legacy_src.parent.mkdir(parents=True, exist_ok=True)
+    legacy_src.write_text('task: "Example"\n- [ ] item\n', encoding="utf-8")
+    git_calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def fake_git(cwd: Path, *args: str) -> tuple[int, str, str]:
+        git_calls.append((cwd, args))
+        return 0, "", ""
+
+    monkeypatch.setattr(cycle, "git", fake_git)
+
+    dest = cycle._claim_task_in_worktree(tmp_path, legacy_rel, logf)
+
+    assert dest == f"{LEGACY_TASKS_DIR}/in-progress/example.md"
+    assert git_calls[0] == (
+        tmp_path,
+        ("mv", legacy_rel, f"{LEGACY_TASKS_DIR}/in-progress/example.md"),
+    )
+
+
+def test_auto_finalize_task_branch_reads_legacy_base_sha(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from config.defaults import LEGACY_RALPH_DATA_DIR
+    from ralph_focus import cycle
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    task = wt / f"{TASKS_DIR}/in-progress/example.md"
+    task.parent.mkdir(parents=True, exist_ok=True)
+    task.write_text('task: "Example"\n- [x] done\n', encoding="utf-8")
+    legacy_base = tmp_path / LEGACY_RALPH_DATA_DIR / "auto-focus-base-sha"
+    legacy_base.parent.mkdir(parents=True, exist_ok=True)
+    legacy_base.write_text("abc123\n", encoding="utf-8")
+
+    git_calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def fake_git(cwd: Path, *args: str) -> tuple[int, str, str]:
+        git_calls.append((cwd, args))
+        if args == ("diff", "--cached", "--quiet"):
+            return 1, "", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(cycle, "git", fake_git)
+
+    cycle._auto_finalize_task_branch(tmp_path, wt, f"{TASKS_DIR}/in-progress/example.md")
+
+    assert git_calls[0] == (wt, ("reset", "--soft", "abc123"))
+
+
+def test_move_completed_on_primary_preserves_legacy_task_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from ralph_focus import cycle
+
+    rel = f"{LEGACY_TASKS_DIR}/in-progress/example.md"
+    task_path = tmp_path / rel
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text('task: "Example"\n- [x] done\n', encoding="utf-8")
+    git_calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def fake_git(cwd: Path, *args: str) -> tuple[int, str, str]:
+        git_calls.append((cwd, args))
+        return 0, "", ""
+
+    monkeypatch.setattr(cycle, "git", fake_git)
+
+    cycle._move_completed_on_primary(tmp_path, rel)
+
+    assert git_calls[0] == (
+        tmp_path,
+        ("mv", rel, f"{LEGACY_TASKS_DIR}/completed/example.md"),
+    )
+
+
+def test_agent_pick_backlog_task_resolves_legacy_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from ralph_focus import cycle
+
+    cfg = AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(rc=0, usage={}),
+        plan_model="planner",
+        execute_model="executor",
+    )
+    nf = cycle.next_task_file(tmp_path)
+    nf.parent.mkdir(parents=True, exist_ok=True)
+    legacy_task = tmp_path / LEGACY_TASKS_DIR / "backlog" / "example.md"
+    legacy_task.parent.mkdir(parents=True, exist_ok=True)
+    legacy_task.write_text('task: "Example"\n- [ ] item\n', encoding="utf-8")
+
+    monkeypatch.setattr(cycle, "_append_phase_log", lambda *_args, **_kwargs: None)
+
+    def fake_run_agent(_cwd: Path, _model: str, _body: str, _logf: Path, _label: str) -> int:
+        nf.write_text(f"{LEGACY_TASKS_DIR}/backlog/example.md\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(cfg, "_run_agent", fake_run_agent)
+
+    picked = _agent_pick_backlog_task(cfg)
+
+    assert picked == legacy_task
