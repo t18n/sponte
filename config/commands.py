@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 def _split_command_list(raw: str) -> tuple[str, ...]:
@@ -14,10 +15,22 @@ VERIFY_COMMANDS: tuple[str, ...] = _split_command_list(
 )
 
 
-def verify_commands_markdown() -> str:
-    if not VERIFY_COMMANDS:
+def resolved_verify_commands(primary: Path | None = None) -> tuple[str, ...]:
+    """Workspace ``commands.verify`` wins; otherwise ``RALPH_VERIFY_COMMANDS``."""
+    if primary is not None:
+        from ralph_focus.workspace_settings import load_workspace_settings
+
+        v = load_workspace_settings(primary).commands.verify
+        if v:
+            return v
+    return VERIFY_COMMANDS
+
+
+def verify_commands_markdown(primary: Path | None = None) -> str:
+    cmds = resolved_verify_commands(primary)
+    if not cmds:
         return "- `(no verification commands configured)`"
-    return "\n".join(f"- `{cmd}`" for cmd in VERIFY_COMMANDS)
+    return "\n".join(f"- `{cmd}`" for cmd in cmds)
 
 
 def git_status_porcelain_args() -> tuple[str, ...]:

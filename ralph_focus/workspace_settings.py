@@ -65,6 +65,72 @@ class WorkspacePolicy:
 
 
 @dataclass
+class WorkspaceCommandSettings:
+    """Per-workspace lifecycle commands (see docs for semantics and token-saving tips)."""
+
+    install: str = ""
+    dev: str = ""
+    check: str = ""
+    build: str = ""
+    test: str = ""
+    verify: tuple[str, ...] = ()
+
+    @classmethod
+    def from_json(cls, raw: object) -> WorkspaceCommandSettings:
+        if not isinstance(raw, dict):
+            return cls()
+
+        def opt_str(key: str) -> str:
+            v = raw.get(key)
+            return v.strip() if isinstance(v, str) and v.strip() else ""
+
+        verify_raw = raw.get("verify")
+        verify_t: tuple[str, ...] = ()
+        if isinstance(verify_raw, list):
+            verify_t = tuple(str(x).strip() for x in verify_raw if str(x).strip())
+
+        return cls(
+            install=opt_str("install"),
+            dev=opt_str("dev"),
+            check=opt_str("check"),
+            build=opt_str("build"),
+            test=opt_str("test"),
+            verify=verify_t,
+        )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if self.install:
+            out["install"] = self.install
+        if self.dev:
+            out["dev"] = self.dev
+        if self.check:
+            out["check"] = self.check
+        if self.build:
+            out["build"] = self.build
+        if self.test:
+            out["test"] = self.test
+        if self.verify:
+            out["verify"] = list(self.verify)
+        return out
+
+
+def merge_command_settings(
+    current: WorkspaceCommandSettings,
+    detected: WorkspaceCommandSettings,
+) -> WorkspaceCommandSettings:
+    """Fill only empty fields from *detected*; user-configured values win."""
+    return WorkspaceCommandSettings(
+        install=current.install or detected.install,
+        dev=current.dev or detected.dev,
+        check=current.check or detected.check,
+        build=current.build or detected.build,
+        test=current.test or detected.test,
+        verify=current.verify if current.verify else detected.verify,
+    )
+
+
+@dataclass
 class WorkspaceSettings:
     trunk_branch: str = DEFAULT_TRUNK_BRANCH
     worktree_root: str = DEFAULT_WORKTREE_ROOT
@@ -75,6 +141,7 @@ class WorkspaceSettings:
     guardrails_path: str = ""
     policy: WorkspacePolicy = field(default_factory=WorkspacePolicy)
     custom_harness: CustomHarnessConfig | None = None
+    commands: WorkspaceCommandSettings = field(default_factory=WorkspaceCommandSettings)
 
     def normalized_trunk(self) -> str:
         s = self.trunk_branch.strip()
@@ -137,6 +204,7 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
     guardrails = raw.get("guardrails")
     policy_raw = raw.get("policy")
     custom_raw = raw.get("custom_harness")
+    commands_raw = raw.get("commands")
 
     guardrails_path = ""
     if isinstance(guardrails, dict):
@@ -162,6 +230,11 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
         guardrails_path=guardrails_path,
         policy=WorkspacePolicy.from_json(policy_raw),
         custom_harness=custom,
+        commands=(
+            WorkspaceCommandSettings.from_json(commands_raw)
+            if isinstance(commands_raw, dict)
+            else WorkspaceCommandSettings()
+        ),
     )
 
 
@@ -190,6 +263,9 @@ def save_workspace_settings(root: Path, settings: WorkspaceSettings) -> None:
             "merge_required": settings.policy.merge_required,
         },
     }
+    cmd_payload = settings.commands.to_json_dict()
+    if cmd_payload:
+        payload["commands"] = cmd_payload
     if custom_payload is not None:
         payload["custom_harness"] = custom_payload
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -199,9 +275,11 @@ __all__ = [
     "DEFAULT_TRUNK_BRANCH",
     "DEFAULT_WORKTREE_ROOT",
     "CustomHarnessConfig",
+    "WorkspaceCommandSettings",
     "WorkspacePolicy",
     "WorkspaceSettings",
     "load_workspace_settings",
+    "merge_command_settings",
     "save_workspace_settings",
     "workspace_settings_path",
 ]

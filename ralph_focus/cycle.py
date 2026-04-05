@@ -345,7 +345,7 @@ class AutoFocusConfig:
             primary=self.primary,
             task_rel=rel_task,
             plan_rel=plan_rel,
-            verify_commands=verify_commands_markdown(),
+            verify_commands=verify_commands_markdown(self.primary),
         )
         if self.resume_handoff_pending and self.resume_handoff.strip():
             self.resume_handoff_pending = False

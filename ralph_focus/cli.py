@@ -57,7 +57,8 @@ from ralph_focus.workspace_resolve import (
     resolve_git_repo_root,
     resolve_primary_workspace,
 )
-from ralph_focus.workspace_init import refresh_priorities_from_backlog
+from ralph_focus.workspace_command_detection import resolved_default_test_command
+from ralph_focus.workspace_init import refresh_priorities_from_backlog, refresh_workspace_commands
 from ralph_focus.task_jobs import (
     read_session_job_status,
     read_task_job_status,
@@ -382,14 +383,14 @@ def _pick_existing_backlog_task(primary: Path) -> Path | None:
     return pending[idx]
 
 
-def _existing_task_defaults(task_path: Path) -> tuple[str, str, str]:
+def _existing_task_defaults(task_path: Path, *, default_test_command: str) -> tuple[str, str, str]:
     text = task_path.read_text(encoding="utf-8", errors="replace")
     title_match = re.search(r"^task:\s*(.+)$", text, flags=re.MULTILINE)
     command_match = re.search(r"^test_command:\s*(.+)$", text, flags=re.MULTILINE)
     goal_match = re.search(r"(?ms)^# Goal\s+(.*?)(?:^## |\Z)", text)
     title = title_match.group(1).strip() if title_match else task_path.stem.replace("-", " ")
     goal = goal_match.group(1).strip() if goal_match else ""
-    test_command = command_match.group(1).strip() if command_match else "uv run pytest -q"
+    test_command = command_match.group(1).strip() if command_match else default_test_command
     return title, goal, test_command
 
 
@@ -426,14 +427,18 @@ def _plan_tasks_interactively(primary: Path) -> list[Path]:
     created: list[Path] = []
     backlog = primary / TASKS_DIR / "backlog"
     backlog.mkdir(parents=True, exist_ok=True)
+    default_test = resolved_default_test_command(primary)
     while True:
         existing_task: Path | None = None
         if _backlog_task_paths(primary) and Confirm.ask("Refine an existing backlog task?", default=False):
             existing_task = _pick_existing_backlog_task(primary)
         if existing_task is not None:
-            title_default, goal_default, test_command_default = _existing_task_defaults(existing_task)
+            title_default, goal_default, test_command_default = _existing_task_defaults(
+                existing_task,
+                default_test_command=default_test,
+            )
         else:
-            title_default, goal_default, test_command_default = (None, None, "uv run pytest -q")
+            title_default, goal_default, test_command_default = (None, None, default_test)
         title = _prompt_required("Task title", default=title_default)
         goal = _prompt_required("What do you want to achieve?", default=goal_default)
         test_command = _prompt_required("Verification command", default=test_command_default)
@@ -462,6 +467,11 @@ def cmd_init() -> None:
         console.print("[red]`sponte init` requires an interactive terminal (stdin must be a TTY).[/red]")
         raise typer.Exit(1)
     if sponte_tasks_layout_valid(primary):
+        if refresh_workspace_commands(primary):
+            console.print(
+                "[green]Updated workspace `commands` in[/green] `.sponte/settings.json` "
+                "[green](merged from repo manifests; existing values kept).[/green]"
+            )
         console.print(f"[green]Workspace already initialized:[/green] {primary / '.sponte'}")
         raise typer.Exit(0)
     bootstrap_workspace_with_prompt(
@@ -1394,6 +1404,19 @@ def cmd_config_show(
     t.add_row("policy.merge_required", str(ws.policy.merge_required))
     if ws.custom_harness and ws.custom_harness.executable.strip():
         t.add_row("custom_harness.executable", ws.custom_harness.executable)
+    cmd = ws.commands
+    if cmd.install:
+        t.add_row("commands.install", cmd.install)
+    if cmd.dev:
+        t.add_row("commands.dev", cmd.dev)
+    if cmd.check:
+        t.add_row("commands.check", cmd.check)
+    if cmd.build:
+        t.add_row("commands.build", cmd.build)
+    if cmd.test:
+        t.add_row("commands.test", cmd.test)
+    if cmd.verify:
+        t.add_row("commands.verify", " ;; ".join(cmd.verify))
     console.print(Panel(t, border_style="cyan"))
 
 

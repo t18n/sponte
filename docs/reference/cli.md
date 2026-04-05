@@ -6,7 +6,7 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Create `.sponte/` layout, settings, tasks dirs (interactive) |
+| `init` | Create `.sponte/` layout, settings, tasks dirs (interactive); pre-fills `commands` when detectable; on an existing workspace, merges detected commands into empty fields only |
 | `task-plan` | Create or refine backlog markdown tasks |
 | `config show` | Print effective `.sponte/settings.json` fields |
 

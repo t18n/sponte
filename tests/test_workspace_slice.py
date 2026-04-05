@@ -40,6 +40,7 @@ def _git_create_linked_worktree(root: Path, name: str = "linked") -> Path:
 def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
     from config.defaults import DEFAULT_AGENT
     from ralph_focus.workspace_settings import (
+        WorkspaceCommandSettings,
         WorkspacePolicy,
         WorkspaceSettings,
         load_workspace_settings,
@@ -83,6 +84,29 @@ def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
     assert again.normalized_guardrails_path() == ".sponte/guardrails.md"
     assert again.policy.max_phase_rounds == 12
     assert again.policy.verification_required is False
+
+    cmds = WorkspaceCommandSettings(
+        install="pnpm install",
+        dev="pnpm run dev",
+        check="pnpm run check",
+        build="pnpm run build",
+        test="pnpm run test",
+        verify=("pnpm run check", "pnpm run test"),
+    )
+    save_workspace_settings(root, WorkspaceSettings(trunk_branch="develop", commands=cmds))
+    with_cmds = load_workspace_settings(root)
+    assert with_cmds.commands.test == "pnpm run test"
+    assert with_cmds.commands.verify == ("pnpm run check", "pnpm run test")
+
+
+def test_merge_command_settings_preserves_user_values() -> None:
+    from ralph_focus.workspace_settings import WorkspaceCommandSettings, merge_command_settings
+
+    cur = WorkspaceCommandSettings(test="user test")
+    det = WorkspaceCommandSettings(test="detected", install="npm ci")
+    merged = merge_command_settings(cur, det)
+    assert merged.test == "user test"
+    assert merged.install == "npm ci"
 
 
 def test_init_harness_probe_skips_when_env_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,6 +218,61 @@ def test_init_sponte_allows_empty_task_store(tmp_path: Path) -> None:
     assert worktrees_base(root).is_dir()
 
 
+def test_init_sponte_detects_package_json_scripts(tmp_path: Path) -> None:
+    from ralph_focus.workspace_init import init_sponte_workspace
+    from ralph_focus.workspace_settings import load_workspace_settings
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git_init_with_commit(root)
+    (root / "package-lock.json").write_text('{"lockfileVersion":3}', encoding="utf-8")
+    (root / "package.json").write_text(
+        '{"name":"t","scripts":{"test":"jest","build":"tsc","check":"eslint ."}}',
+        encoding="utf-8",
+    )
+
+    init_sponte_workspace(root, source=None, trunk_branch="sponte")
+
+    ws = load_workspace_settings(root)
+    assert ws.commands.test == "npm run test"
+    assert ws.commands.build == "npm run build"
+    assert ws.commands.check == "npm run check"
+    assert ws.commands.verify == ("npm run check", "npm run build", "npm run test")
+
+
+def test_init_sponte_merges_commands_on_subsequent_init_without_trunk(tmp_path: Path) -> None:
+    from ralph_focus.workspace_init import init_sponte_workspace
+    from ralph_focus.workspace_settings import load_workspace_settings
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git_init_with_commit(root)
+    init_sponte_workspace(root, source=None, trunk_branch="sponte")
+    assert not load_workspace_settings(root).commands.test
+
+    (root / "package-lock.json").write_text('{"lockfileVersion":3}', encoding="utf-8")
+    (root / "package.json").write_text('{"scripts":{"test":"jest"}}', encoding="utf-8")
+    init_sponte_workspace(root, source=None, trunk_branch=None)
+
+    assert load_workspace_settings(root).commands.test == "npm run test"
+
+
+def test_refresh_workspace_commands_updates_settings(tmp_path: Path) -> None:
+    from ralph_focus.workspace_init import init_sponte_workspace, refresh_workspace_commands
+    from ralph_focus.workspace_settings import load_workspace_settings
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git_init_with_commit(root)
+    init_sponte_workspace(root, source=None, trunk_branch="sponte")
+    (root / "package-lock.json").write_text('{"lockfileVersion":3}', encoding="utf-8")
+    (root / "package.json").write_text('{"scripts":{"test":"jest"}}', encoding="utf-8")
+
+    assert refresh_workspace_commands(root) is True
+    assert load_workspace_settings(root).commands.test == "npm run test"
+    assert refresh_workspace_commands(root) is False
+
+
 def test_init_cli_repairs_partial_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from ralph_focus import cli
     from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
@@ -283,6 +362,33 @@ def test_init_cli_initializes_workspace_without_running_cycle(monkeypatch: pytes
     assert (root / TASKS_DIR / "priorities.md").is_file()
 
 
+def test_init_cli_refreshes_commands_when_already_initialized(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from ralph_focus import cli
+    from ralph_focus.workspace_init import init_sponte_workspace
+    from ralph_focus.workspace_settings import load_workspace_settings
+
+    monkeypatch.setenv("SPONTE_INIT_SKIP_HARNESS_PROBE", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git_init_with_commit(root)
+    init_sponte_workspace(root, source=None, trunk_branch="sponte")
+    (root / "package-lock.json").write_text('{"lockfileVersion":3}', encoding="utf-8")
+    (root / "package.json").write_text('{"scripts":{"test":"jest"}}', encoding="utf-8")
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(cli, "_cli_allows_prompts", lambda: True)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["init"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert load_workspace_settings(root).commands.test == "npm run test"
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert "Updated workspace" in combined
+
+
 def test_plan_cli_creates_task_for_initialized_workspace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -317,6 +423,51 @@ def test_plan_cli_creates_task_for_initialized_workspace(
     assert "test_command: uv run pytest -q" in text
     priorities = (root / TASKS_DIR / "priorities.md").read_text(encoding="utf-8")
     assert "./backlog/cli-init-redesign.md" in priorities
+
+
+def test_plan_cli_uses_workspace_default_test_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from ralph_focus import cli
+    from ralph_focus.workspace_init import init_sponte_workspace
+    from ralph_focus.workspace_settings import (
+        WorkspaceCommandSettings,
+        WorkspaceSettings,
+        save_workspace_settings,
+    )
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git_init_with_commit(root)
+    init_sponte_workspace(root, source=None, trunk_branch="sponte")
+    save_workspace_settings(
+        root,
+        WorkspaceSettings(commands=WorkspaceCommandSettings(test="pnpm run test")),
+    )
+
+    monkeypatch.setattr(cli, "_cli_allows_prompts", lambda: True)
+    n = 0
+
+    def fake_prompt(*_args, **kwargs):
+        nonlocal n
+        n += 1
+        if n == 1:
+            return "Scoped feature"
+        if n == 2:
+            return "Implement the feature."
+        return kwargs.get("default") or ""
+
+    monkeypatch.setattr(cli.Prompt, "ask", fake_prompt)
+    monkeypatch.setattr(cli.Confirm, "ask", lambda *_args, **_kwargs: False)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
+
+    assert result.exit_code == 0
+    created = root / TASKS_DIR / "backlog" / "scoped-feature.md"
+    assert created.is_file()
+    assert "test_command: pnpm run test" in created.read_text(encoding="utf-8")
 
 
 def test_plan_cli_can_refine_existing_backlog_task(

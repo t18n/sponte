@@ -146,6 +146,10 @@ Default app-state locations:
 - Linux/XDG: `$XDG_STATE_HOME/sponte` or `~/.local/state/sponte`
 - override: `SPONTE_STATE_DIR`
 
+Other environment variables:
+
+- `RALPH_VERIFY_COMMANDS`: `;;`-separated shell commands injected into verify-related agent prompts when `.sponte/settings.json` has no non-empty `commands.verify` list. Per-workspace `commands.verify` overrides this when set.
+
 ## Init Flow
 
 `sponte init` is the workspace bootstrap entrypoint.
@@ -157,6 +161,7 @@ It will:
 3. create `.sponte/tasks/`, `.sponte/settings.json`, and the default worktree root
 4. set the default trunk branch to `sponte` unless you choose another name
 5. ensure the local trunk branch exists
+6. pre-fill `commands` in `.sponte/settings.json` when the repo root looks like a single stack (see [Configuration](docs/reference/config.md)); re-running `sponte init` on an existing workspace merges any new detections without overwriting values you already set
 
 After initialization, use `sponte task-plan` to add or refine backlog tasks before starting the first `sponte agent` cycle.
 

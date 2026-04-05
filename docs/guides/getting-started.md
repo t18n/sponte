@@ -15,6 +15,8 @@ sponte init
 
 `init` creates `.sponte/`, writes `.sponte/settings.json` after **validated** harness and model choices (lightweight probe such as `hello`), and sets up task directories.
 
+`init` also tries to detect workspace lifecycle commands (`install`, `dev`, `check`, `build`, `test`, and an ordered `verify` list) from files at the repo root (for example `package.json`, `Cargo.toml`, `go.mod`, or Python/pytest hints). If several of those ecosystems are present at the root, Sponte skips guessing and leaves `commands` for you to set. Re-running `sponte init` later merges any new detections into **empty** fields without overwriting edits. You can always adjust `commands` in `.sponte/settings.json`. They act as a **token saver**: pointing Sponte at fast, repo-specific checks avoids generic or overly heavy verification and cuts down noisy command output in agent sessions.
+
 ## First tasks
 
 ```bash

@@ -9,9 +9,11 @@ from pathlib import Path
 from config.defaults import SPONTE_DIR, TASKS_DIR, WORKTREE_BASE_DIR
 from ralph_focus.git_ops import trunk_branch_ref
 from ralph_focus.paths import worktrees_base
+from ralph_focus.workspace_command_detection import detect_workspace_commands
 from ralph_focus.workspace_settings import (
     WorkspaceSettings,
     load_workspace_settings,
+    merge_command_settings,
     save_workspace_settings,
     workspace_settings_path,
 )
@@ -134,8 +136,14 @@ def init_sponte_workspace(
         validated = trunk_branch_ref(repo_root, trunk_name=settings.normalized_trunk())
         settings = replace(settings, trunk_branch=validated)
 
+    pre_merge_commands = settings.commands
+    detected = detect_workspace_commands(repo_root)
+    merged_commands = merge_command_settings(settings.commands, detected)
+    settings = replace(settings, commands=merged_commands)
+    commands_changed = merged_commands != pre_merge_commands
+
     ensure_gitignore_sponte(repo_root, settings.normalized_worktree_root())
-    if not settings_exists or trunk_branch is not None:
+    if not settings_exists or trunk_branch is not None or commands_changed:
         save_workspace_settings(repo_root, settings)
     worktrees_base(repo_root).mkdir(parents=True, exist_ok=True)
 
@@ -147,9 +155,25 @@ def init_sponte_workspace(
         raise RuntimeError("initialization did not produce a valid tasks layout")
 
 
+def refresh_workspace_commands(repo_root: Path) -> bool:
+    """
+    Merge detected commands into existing settings and save if anything changed.
+
+    Used when a workspace is already initialized (e.g. re-run ``sponte init``) to
+    backfill new ``commands.*`` fields without overwriting user-set values.
+    """
+    settings = load_workspace_settings(repo_root)
+    merged = merge_command_settings(settings.commands, detect_workspace_commands(repo_root))
+    if merged == settings.commands:
+        return False
+    save_workspace_settings(repo_root, replace(settings, commands=merged))
+    return True
+
+
 __all__ = [
     "ensure_gitignore_sponte",
     "import_tasks_from_source",
     "init_sponte_workspace",
     "refresh_priorities_from_backlog",
+    "refresh_workspace_commands",
 ]
