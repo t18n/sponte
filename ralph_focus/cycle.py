@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -58,9 +57,11 @@ from ralph_focus.paths import (
     ralph_data_dir,
     readable_base_sha_file,
     rotation_handoff_file,
+    sanitize_job_segment,
     selection_lock_path,
     task_lock_path_for_rel,
     worktrees_base,
+    workspace_task_claim_lock_path,
 )
 from ralph_focus.primary_precheck import (
     PrimaryPrecheckKind,
@@ -79,8 +80,17 @@ from ralph_focus.progress import (
 from ralph_focus.prompts import render_prompt
 from ralph_focus.resume import ResumeState, clear_resume, load_resume, write_resume
 from ralph_focus.session_stats import SessionStats, _usage_rotation_tokens
+from ralph_focus.task_jobs import (
+    SessionJobStatus,
+    TaskJobStatus,
+    init_task_job_artifacts,
+    touch_session_job_folder,
+    write_session_job_status,
+    write_task_job_status,
+)
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
 from ralph_focus.tasks import (
+    compute_task_id,
     concrete_task_rel,
     count_checklist,
     normalize_task_path,
@@ -94,12 +104,6 @@ from ralph_focus.tasks import (
 )
 
 ProgressMode = Literal["off", "on", "full"]
-
-
-def _slug_from_stem(stem: str) -> str:
-    s = stem.lower()
-    s = re.sub(r"[^a-z0-9._-]+", "-", s)
-    return s.strip("-") or "task"
 
 
 def phase_uses_plan_model(phase: str) -> bool:
@@ -230,6 +234,8 @@ class AutoFocusConfig:
     current_wt_path: Path | None = None
     runner_id: str = "default"
     held_task_lock_path: Path | None = None
+    held_workspace_claim_lock_path: Path | None = None
+    task_id: str = ""
     rotate_policy: TokenRotationPolicy = field(
         default_factory=lambda: TokenRotationPolicy(
             rotate_threshold=ROTATE_THRESHOLD_TOKENS,
@@ -338,6 +344,59 @@ def _release_task_lock(cfg: AutoFocusConfig) -> None:
     if cfg.held_task_lock_path is not None:
         release_lock(cfg.held_task_lock_path)
         cfg.held_task_lock_path = None
+    if cfg.held_workspace_claim_lock_path is not None:
+        release_lock(cfg.held_workspace_claim_lock_path)
+        cfg.held_workspace_claim_lock_path = None
+
+
+def _try_workspace_claim_lock(cfg: AutoFocusConfig, primary: Path, task_abs: Path) -> bool:
+    tid = compute_task_id(task_stem=task_abs.stem, task_title=task_label(task_abs))
+    wlp = workspace_task_claim_lock_path(primary, tid)
+    if not try_acquire_task_lock(wlp):
+        return False
+    cfg.held_workspace_claim_lock_path = wlp
+    cfg.task_id = tid
+    return True
+
+
+def _sync_job_status_files(
+    cfg: AutoFocusConfig,
+    *,
+    wt_path: Path,
+    br_name: str,
+    rel_task: str,
+    phase: str,
+) -> None:
+    if not cfg.task_id.strip():
+        return
+    title = ""
+    tp = wt_path / rel_task
+    if tp.is_file():
+        title = task_label(tp)
+    write_task_job_status(
+        cfg.primary,
+        TaskJobStatus(
+            task_id=cfg.task_id,
+            rel_task=rel_task,
+            stage="in-progress",
+            owning_session_id=cfg.runner_id,
+            worktree_path=str(wt_path),
+            branch=br_name,
+            task_title=title,
+        ),
+    )
+    write_session_job_status(
+        cfg.primary,
+        SessionJobStatus(
+            session_id=cfg.runner_id,
+            workspace_root=str(cfg.primary.resolve()),
+            active_task_id=cfg.task_id,
+            rel_task=rel_task,
+            phase=phase,
+            worktree_path=str(wt_path),
+            branch=br_name,
+        ),
+    )
 
 
 def _log_tail(logf: Path, *, lines: int = 80) -> str:
@@ -572,6 +631,12 @@ def run_one_cycle(
         cfg.resume_handoff = handoff_path.read_text(encoding="utf-8", errors="replace") if handoff_path.is_file() else ""
         handoff_path.unlink(missing_ok=True)
         cfg.resume_handoff_pending = bool(cfg.resume_handoff.strip())
+        cfg.task_id = (st.task_id or "").strip()
+        if not cfg.task_id:
+            tpath = wt_path / rel_task
+            if tpath.is_file():
+                cfg.task_id = compute_task_id(task_stem=tpath.stem, task_title=task_label(tpath))
+        touch_session_job_folder(primary, cfg.runner_id)
         oc, dc = count_checklist(wt_path / rel_task)
         label = task_label(wt_path / rel_task)
         if cfg.progress != "off":
@@ -583,6 +648,7 @@ def run_one_cycle(
             primary,
             runner_id=cfg.runner_id,
         ).mkdir(parents=True, exist_ok=True)
+        touch_session_job_folder(primary, cfg.runner_id)
         ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         logf = (
             auto_focus_logs_dir(
@@ -599,12 +665,10 @@ def run_one_cycle(
         if code != 0 or task_abs is None:
             return 1
         task_rel = task_abs.relative_to(primary).as_posix()
-        stem = Path(task_rel).stem
 
-        slug = _slug_from_stem(stem)
-        shortid = secrets.token_hex(2)
-        wt_path = worktrees_base(primary) / f"raf-{slug}-{shortid}"
-        br_name = f"ralph/auto-focus-{slug}-{shortid}"
+        safe_tid = sanitize_job_segment(cfg.task_id)
+        wt_path = worktrees_base(primary) / f"wt-{safe_tid}"
+        br_name = f"ralph/wt-{safe_tid}"[:200]
         main_ref = resolve_trunk_branch_ref(primary, cli_override=cfg.trunk_branch_override)
 
         oc, dc = count_checklist(task_abs)
@@ -624,6 +688,13 @@ def run_one_cycle(
         cfg.resume_handoff_pending = False
 
         _record_base(primary, wt_path, task_rel)
+        init_task_job_artifacts(
+            primary,
+            task_id=cfg.task_id,
+            task_abs=task_abs,
+            session_id=cfg.runner_id,
+            rel_task=task_rel,
+        )
         claimed = _claim_task_in_worktree(wt_path, task_rel, logf)
         if claimed is None:
             _release_task_lock(cfg)
@@ -1126,23 +1197,29 @@ def _persist(
         no_progress_loops=cfg.no_progress_loops,
         token_warning_emitted="true" if cfg.token_warning_emitted else "false",
         resume_runner_id=cfg.runner_id,
+        task_id=cfg.task_id,
     )
     write_resume(
         cfg.primary,
         st,
         runner_id=cfg.runner_id,
     )
+    _sync_job_status_files(cfg, wt_path=wt_path, br_name=br_name, rel_task=rel_task, phase=phase)
 
 
 def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
     primary = cfg.primary
 
-    def _take_task_lock(task_abs: Path) -> bool:
+    def _take_task_and_claim_lock(task_abs: Path) -> bool:
         rel = task_abs.relative_to(primary).as_posix()
         lp = task_lock_path_for_rel(primary, rel)
         if not try_acquire_task_lock(lp):
             return False
         cfg.held_task_lock_path = lp
+        if not _try_workspace_claim_lock(cfg, primary, task_abs):
+            release_lock(lp)
+            cfg.held_task_lock_path = None
+            return False
         return True
 
     if cfg.task_arg:
@@ -1151,7 +1228,7 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
             return (1, None)
         if not task_has_pending(p):
             return (1, None)
-        if not _take_task_lock(p):
+        if not _take_task_and_claim_lock(p):
             return (2, None)
         return (0, p)
 
@@ -1163,7 +1240,7 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
         return (1, None)
     try:
         for p in priority_task_paths_pending(pri_file, primary):
-            if _take_task_lock(p):
+            if _take_task_and_claim_lock(p):
                 return (0, p)
     finally:
         release_lock(sel_lp)
@@ -1180,7 +1257,7 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
         picked = _agent_pick_backlog_task(cfg)
         if picked is None:
             return (1, None)
-        if not _take_task_lock(picked):
+        if not _take_task_and_claim_lock(picked):
             return (2, None)
         return (0, picked)
     finally:
