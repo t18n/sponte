@@ -20,6 +20,7 @@ def test_help_hides_removed_commands() -> None:
     assert result.exit_code == 0
     output = result.stdout.lower()
     assert "init" in output
-    assert "plan" in output
-    assert "auto-focus" in output
+    assert "task-plan" in output
+    assert "agent" in output
+    assert "auto-focus" not in output
     assert "smoke" not in output

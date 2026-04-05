@@ -65,7 +65,7 @@ console = Console(stderr=True)
 
 
 def _new_rap_id() -> str:
-    """RAP id — Ralph auto-focus process id (opaque, unique per invocation)."""
+    """Opaque session id (one per ``sponte agent`` invocation)."""
     return f"rap-{secrets.token_hex(4)}"
 
 
@@ -146,7 +146,7 @@ def _rotation_handoff_markdown(
             f"Resume the same generation to continue from `{resume_state.phase or 'unknown'}`:",
             "",
             "```bash",
-            f"sponte auto-focus --resume {runner_id} --plan-model auto --execute-model auto",
+            f"sponte agent --resume {runner_id} --plan-model auto --execute-model auto",
             "```",
         ]
     )
@@ -191,7 +191,7 @@ def _disk_full_resume_hint(detail: str, *, runner_id: str) -> str | None:
         return None
     return (
         "disk appears full; free space, then resume with: "
-        f"sponte auto-focus --resume {shlex.quote(runner_id)} "
+        f"sponte agent --resume {shlex.quote(runner_id)} "
         "--plan-model auto --execute-model auto"
     )
 
@@ -222,7 +222,7 @@ def _print_auto_focus_settings(
     runner_id: str,
     complete_worktree_mode: bool = False,
 ) -> None:
-    t = Table(title="Sponte auto-focus — session settings")
+    t = Table(title="Sponte agent — session settings")
     t.add_column("Setting")
     t.add_column("Value")
     t.add_row("Repository", str(primary))
@@ -402,10 +402,10 @@ def cmd_init() -> None:
 
 
 @app.command(
-    "auto-focus",
+    "agent",
     help="Run plan → implement cycles in an isolated worktree until done or limits hit.",
 )
-def cmd_auto_focus(
+def cmd_agent(
     workspace: Annotated[
         Path | None,
         typer.Option("--workspace", "-w", help="Git checkout root (run from anywhere)"),
@@ -538,8 +538,8 @@ def cmd_auto_focus(
 
     if resume_id is None and not cwt_arg and not task:
         console.print(
-            "[red]`sponte auto-focus` requires a task path, `--resume`, or `--complete-worktree`. "
-            "Use `sponte plan` to create tasks first.[/red]"
+            "[red]`sponte agent` requires a task path, `--resume`, or `--complete-worktree`. "
+            "Use `sponte task-plan` to create tasks first.[/red]"
         )
         raise typer.Exit(1)
     if resume_id is None and not cwt_arg:
@@ -847,7 +847,7 @@ def cmd_auto_focus(
         if cfg.current_wt_path and cfg.current_wt_path.is_dir() and not cleanup_on_exit:
             console.print(
                 f"[yellow]Worktree left for inspection:[/yellow] {cfg.current_wt_path}\n"
-                f"Resume with: sponte auto-focus --resume "
+                f"Resume with: sponte agent --resume "
                 f"{shlex.quote(runner_id_effective)} --plan-model auto --execute-model auto"
             )
 
@@ -917,8 +917,8 @@ def cmd_remove(
     raise typer.Exit(worktree_remove_interactive(ws, console=console))
 
 
-@app.command("plan", help="Turn backlog notes into `.sponte/tasks/` markdown files interactively.")
-def cmd_plan(
+@app.command("task-plan", help="Turn backlog notes into `.sponte/tasks/` markdown files interactively.")
+def cmd_task_plan(
     workspace: Annotated[
         Path | None,
         typer.Option("--workspace", "-w", help="Git checkout root (run from anywhere)"),
@@ -935,7 +935,7 @@ def cmd_plan(
         interactive=False,
     )
     if not _cli_allows_prompts():
-        console.print("[red]`sponte plan` requires an interactive terminal (stdin must be a TTY).[/red]")
+        console.print("[red]`sponte task-plan` requires an interactive terminal (stdin must be a TTY).[/red]")
         raise typer.Exit(1)
     created = _plan_tasks_interactively(primary)
     console.print(f"[green]Planned {len(created)} task(s) in[/green] {primary / TASKS_DIR}")

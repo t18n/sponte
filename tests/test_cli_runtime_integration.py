@@ -55,7 +55,7 @@ def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Pa
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             f"{TASKS_DIR}/backlog/example.md",
             "--once",
             "--skip-preflight",
@@ -79,12 +79,12 @@ def test_auto_focus_requires_explicit_task_or_resume(monkeypatch, tmp_path: Path
     monkeypatch.setattr(cli, "get_harness", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should stop before harness lookup")))
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["auto-focus", "--once"])
+    result = runner.invoke(cli.app, ["agent", "--once"])
 
     assert result.exit_code != 0
     output = (result.stdout + result.stderr).lower()
     assert "requires a task path" in output
-    assert "sponte plan" in output
+    assert "sponte task-plan" in output
 
 
 def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_config(monkeypatch, tmp_path: Path) -> None:
@@ -142,7 +142,7 @@ def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_confi
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             "--once",
             "--resume",
             "lane-a",
@@ -210,7 +210,7 @@ def test_auto_focus_resume_prints_restored_task_pick_settings(monkeypatch, tmp_p
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             "--once",
             "--resume",
             "lane-a",
@@ -282,7 +282,7 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             "--complete-worktree",
             str(wt),
             "--skip-preflight",
@@ -357,7 +357,7 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             "--complete-worktree",
             str(wt),
             "--skip-preflight",
@@ -430,7 +430,7 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             "--complete-worktree",
             str(wt),
             "--skip-preflight",
@@ -451,7 +451,7 @@ def test_auto_focus_complete_worktree_rejects_combine_resume(monkeypatch, tmp_pa
     result = runner.invoke(
         cli.app,
         [
-            "auto-focus",
+            "agent",
             "--complete-worktree",
             str(tmp_path / "wt"),
             "--resume",

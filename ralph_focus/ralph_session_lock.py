@@ -1,6 +1,6 @@
-"""Persist current auto-focus runner id to Sponte app state ``ralph.lock`` (per workspace).
+"""Persist current agent session id to Sponte app state ``ralph.lock`` (per workspace).
 
-Several concurrent ``auto-focus`` processes overwrite the same file; use
+Several concurrent ``sponte agent`` processes overwrite the same file; use
 ``--runner-id`` / ``RALPH_RUNNER_ID`` per lane for **new** sessions when running multiple terminals.
 """
 
@@ -46,7 +46,7 @@ def write_ralph_lock(
         "resuming_this_cycle": resuming_this_cycle,
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "resume_hint": (
-            "sponte auto-focus --resume "
+            "sponte agent --resume "
             f"{shlex.quote(runner_id)} --plan-model auto --execute-model auto"
         ),
     }

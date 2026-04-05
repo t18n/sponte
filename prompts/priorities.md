@@ -4,4 +4,4 @@ Edit **only** `__PRIORITIES_FILE__` to reflect the best next task to work on (to
 
 Keep existing structure and tone. Do not delete historical context without reason.
 
-You do **not** need to `git commit`: auto-focus will commit any pending worktree changes after this phase so merge can proceed.
+You do **not** need to `git commit`: Sponte will commit any pending worktree changes after this phase so merge can proceed.

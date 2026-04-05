@@ -889,7 +889,7 @@ def run_one_cycle(
         )
         if rc == 1:
             return rc
-        if not _commit_worktree_pending_if_dirty(wt_path, logf, "priorities after auto-focus"):
+        if not _commit_worktree_pending_if_dirty(wt_path, logf, "priorities after agent"):
             return 1
         phase = "VERIFY"
         _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
@@ -925,7 +925,7 @@ def run_one_cycle(
                 merge_dirty_before = not worktree_clean(wt_path)
                 if merge_dirty_before:
                     _append_phase_log(logf, "PRE_MERGE_COMMIT")
-                    if not _commit_worktree_pending_if_dirty(wt_path, logf, "pre-merge auto-focus"):
+                    if not _commit_worktree_pending_if_dirty(wt_path, logf, "pre-merge agent"):
                         merge_precheck_failed(
                             "Could not commit pending worktree changes before merge.",
                             "See run log (AUTO_COMMIT sections). Fix git state in the worktree, then retry with --resume RUNNER_ID.",
@@ -1340,7 +1340,7 @@ def _auto_finalize_task_branch(primary: Path, wt: Path, rel_task: str) -> None:
     code, out, _ = git(wt, "diff", "--cached", "--quiet")
     if code == 0:
         return
-    subj = truncate_subject(label, prefix="ralph(auto-focus): ", max_total=50)
+    subj = truncate_subject(label, prefix="ralph(sponte): ", max_total=50)
     git(
         wt,
         "-c",
@@ -1438,7 +1438,7 @@ def _merge_feature_to_main(primary: Path, branch: str, main_ref: str, logf: Path
     if rc != 0:
         return False
     suffix = branch.split("/")[-1]
-    msg = truncate_subject(f"merge {suffix}", prefix="ralph(auto-focus): ", max_total=50)
+    msg = truncate_subject(f"merge {suffix}", prefix="ralph(sponte): ", max_total=50)
     rc, _, e = git(primary, *git_merge_feature_args(branch, msg))
     with logf.open("a", encoding="utf-8") as lf:
         lf.write(e)

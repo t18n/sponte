@@ -45,7 +45,7 @@ def lint_commit_message(msg: str) -> MessageLint:
     return MessageLint(warnings)
 
 
-def truncate_subject(label: str, prefix: str = "ralph(auto-focus): ", max_total: int = 50) -> str:
+def truncate_subject(label: str, prefix: str = "ralph(sponte): ", max_total: int = 50) -> str:
     """Fit orchestrator auto-commit subject under max_total characters."""
     room = max_total - len(prefix)
     if room < 8:
