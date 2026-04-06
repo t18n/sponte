@@ -12,23 +12,8 @@ def sponte_tasks_dir_exists(root: Path) -> bool:
 
 
 def sponte_tasks_layout_valid(root: Path) -> bool:
-    """True when tasks dir exists with stage folders (backlog is source of truth).
-
-    ``priorities.md`` is optional; agent --auto and backlog tooling read ``backlog/*.md``
-    directly.
-    """
-    td = root / TASKS_DIR
-    if not td.is_dir():
-        return False
-    backlog = td / "backlog"
-    in_progress = td / "in-progress"
-    review = td / "review-required"
-    completed = td / "completed"
-    if not backlog.is_dir() or not in_progress.is_dir() or not completed.is_dir():
-        return False
-    if not review.is_dir():
-        review.mkdir(parents=True, exist_ok=True)
-    return True
+    """True when ``.sponte/tasks`` exists (flat or staged markdown files)."""
+    return (root / TASKS_DIR).is_dir()
 
 
 __all__ = ["sponte_tasks_dir_exists", "sponte_tasks_layout_valid"]

@@ -32,7 +32,12 @@ def _sponte_root_posix() -> str:
 
 
 def _gitignore_entry_sponte() -> str:
-    return f"{_sponte_root_posix()}/\n"
+    root = _sponte_root_posix()
+    return (
+        f"{root}/**\n"
+        f"!{root}/artifacts/\n"
+        f"!{root}/artifacts/**\n"
+    )
 
 
 def _worktree_gitignore_line_if_needed(normalized_worktree_root: str) -> str | None:
@@ -69,6 +74,9 @@ def ensure_gitignore_sponte(repo_root: Path, worktree_root: str = WORKTREE_BASE_
     redundant_exact: set[str] = {
         sponte_root,
         f"{sponte_root}/",
+        f"{sponte_root}/**",
+        f"!{sponte_root}/artifacts/",
+        f"!{sponte_root}/artifacts/**",
         SPONTE_GUARDRAILS_PATH,
         SPONTE_PROGRESS_PATH,
     }
@@ -198,8 +206,6 @@ def init_sponte_workspace(
 
     if source is not None:
         import_tasks_from_source(source, repo_root)
-    if not (repo_root / TASKS_DIR / "priorities.md").is_file():
-        refresh_priorities_from_backlog(repo_root)
     if not sponte_tasks_layout_valid(repo_root):
         raise RuntimeError("initialization did not produce a valid tasks layout")
 
