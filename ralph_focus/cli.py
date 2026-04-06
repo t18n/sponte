@@ -1212,8 +1212,15 @@ def cmd_task_cleanup(
         Path | None,
         typer.Option("--workspace", "-w", help="Git checkout root"),
     ] = None,
+    migrate_task_ids: Annotated[
+        bool,
+        typer.Option(
+            "--migrate-task-ids",
+            help="Rename job dirs to path-derived task_id when rel_task still matches a file",
+        ),
+    ] = False,
 ) -> None:
-    repairs, notes = task_cleanup(_cli_primary(workspace))
+    repairs, notes = task_cleanup(_cli_primary(workspace), migrate_task_ids=migrate_task_ids)
     console.print(f"[green]Repairs applied:[/green] {repairs}")
     for line in notes:
         console.print(f"  • {line}")

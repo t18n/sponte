@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import secrets
+import shutil
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from ralph_focus.git_ops import git, worktree_registered
 from ralph_focus.lockfile import release_lock
 from ralph_focus.paths import (
     auto_focus_logs_dir,
+    sponte_job_task_dir,
     sponte_jobs_sessions_root,
     sponte_jobs_tasks_root,
     workspace_task_claim_lock_path,
@@ -28,8 +31,13 @@ from ralph_focus.task_jobs import (
     write_session_job_status,
     write_task_job_status,
 )
-from ralph_focus.tasks import concrete_task_rel, task_stage, task_with_stage
-from ralph_focus.tasks_lock_registry import tasks_lock_remove
+from ralph_focus.tasks import (
+    concrete_task_rel,
+    task_id_from_resolved_path,
+    task_stage,
+    task_with_stage,
+)
+from ralph_focus.tasks_lock_registry import tasks_lock_prune_missing, tasks_lock_remove
 from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.workspace_settings import load_workspace_settings
 from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
@@ -175,10 +183,138 @@ def cancel_all_active_tasks(repo: Path) -> tuple[int, list[str]]:
     return n, errors
 
 
-def task_cleanup(repo: Path) -> tuple[int, list[str]]:
-    """Conservative repair: orphan claim locks, stale job rows (missing worktree)."""
+def migrate_task_job_ids(repo: Path) -> tuple[int, list[str]]:
+    """
+    Rename ``.sponte/jobs/tasks/<old>/`` to path-derived ids when ``status.json``
+    still carries a legacy title-based ``task_id``.
+    """
     repairs = 0
     notes: list[str] = []
+    root = sponte_jobs_tasks_root(repo)
+    if not root.is_dir():
+        return 0, notes
+    for status_path in sorted(root.glob("*/status.json")):
+        try:
+            raw = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        tid = str(raw.get("task_id", "")).strip()
+        if not tid:
+            continue
+        st = read_task_job_status(repo, tid)
+        if st is None:
+            continue
+        if st.stage == "in-progress" and (st.owning_session_id or "").strip():
+            notes.append(f"skip migrate {tid}: active in-progress owner")
+            continue
+        rel = (st.rel_task or "").strip()
+        if not rel:
+            notes.append(f"skip migrate {tid}: empty rel_task")
+            continue
+        task_path = repo / concrete_task_rel(repo, rel)
+        if not task_path.is_file():
+            notes.append(f"skip migrate {tid}: missing task file ({rel})")
+            continue
+        try:
+            expected = task_id_from_resolved_path(task_path.resolve())
+        except OSError:
+            notes.append(f"skip migrate {tid}: cannot resolve task path")
+            continue
+        if expected == st.task_id:
+            continue
+        old_dir = status_path.parent
+        new_dir = sponte_job_task_dir(repo, expected)
+        if new_dir.exists():
+            notes.append(f"skip migrate {tid} → {expected}: target dir exists")
+            continue
+        try:
+            shutil.move(str(old_dir), str(new_dir))
+        except OSError as exc:
+            notes.append(f"skip migrate {tid}: move failed ({exc})")
+            continue
+        st_moved = read_task_job_status(repo, expected)
+        if st_moved is None:
+            notes.append(f"migrate {tid} → {expected}: status missing after move")
+            continue
+        write_task_job_status(repo, replace(st_moved, task_id=expected))
+        old_lock = workspace_task_claim_lock_path(repo, tid)
+        new_lock = workspace_task_claim_lock_path(repo, expected)
+        if old_lock.is_file():
+            try:
+                if new_lock.is_file():
+                    old_lock.unlink(missing_ok=True)
+                else:
+                    shutil.move(str(old_lock), str(new_lock))
+            except OSError:
+                pass
+        sessions_root = sponte_jobs_sessions_root(repo)
+        if sessions_root.is_dir():
+            for sp in sessions_root.glob("*/status.json"):
+                try:
+                    sraw = json.loads(sp.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(sraw, dict):
+                    continue
+                sid = str(sraw.get("session_id", "")).strip() or sp.parent.name
+                active = str(sraw.get("active_task_id", "")).strip()
+                if active != tid:
+                    continue
+                existing = read_session_job_status(repo, sid)
+                if existing is not None:
+                    write_session_job_status(
+                        repo,
+                        replace(existing, active_task_id=expected),
+                    )
+        repairs += 1
+        notes.append(f"migrated task job {tid} → {expected}")
+    return repairs, notes
+
+
+def task_cleanup(repo: Path, *, migrate_task_ids: bool = False) -> tuple[int, list[str]]:
+    """Conservative repair: orphan claim locks, stale job rows, deferred job-dir prunes."""
+    repairs = 0
+    notes: list[str] = []
+    n_prune, stale_paths = tasks_lock_prune_missing(repo)
+    if n_prune:
+        repairs += n_prune
+        for p in stale_paths:
+            notes.append(f"tasks.lock: dropped missing file path ({p})")
+
+    root = sponte_jobs_tasks_root(repo)
+    if root.is_dir():
+        for status_path in sorted(root.glob("*/status.json")):
+            tid = ""
+            try:
+                raw = json.loads(status_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(raw, dict):
+                tid = str(raw.get("task_id", "")).strip()
+            if not tid:
+                continue
+            st = read_task_job_status(repo, tid)
+            if st is None:
+                continue
+            if not (st.completed and st.cleanup_pending):
+                continue
+            rel = (st.rel_task or "").strip()
+            tp = repo / concrete_task_rel(repo, rel) if rel else None
+            if tp is not None and tp.is_file():
+                notes.append(
+                    f"skip prune {tid}: task file still on disk ({rel}); clear checklist or remove manually"
+                )
+                continue
+            job_dir = status_path.parent
+            shutil.rmtree(job_dir, ignore_errors=True)
+            if not job_dir.is_dir():
+                repairs += 1
+                notes.append(f"removed completed job dir for {tid} (cleanup_pending)")
+            else:
+                notes.append(f"could not remove job dir for {tid}")
+
     lock_root = repo / ".sponte" / "locks" / "tasks"
     if lock_root.is_dir():
         for lp in lock_root.glob("*.lock"):
@@ -186,9 +322,8 @@ def task_cleanup(repo: Path) -> tuple[int, list[str]]:
                 repairs += 1
                 notes.append(f"removed stale lock {lp.name}")
 
-    root = sponte_jobs_tasks_root(repo)
     if root.is_dir():
-        for status_path in root.glob("*/status.json"):
+        for status_path in sorted(root.glob("*/status.json")):
             try:
                 raw = json.loads(status_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, TypeError):
@@ -232,6 +367,10 @@ def task_cleanup(repo: Path) -> tuple[int, list[str]]:
                 )
                 repairs += 1
                 notes.append(f"repaired orphan in-progress {tid}")
+    if migrate_task_ids:
+        m_repairs, m_notes = migrate_task_job_ids(repo)
+        repairs += m_repairs
+        notes.extend(m_notes)
     if repairs:
         try:
             bump_summary(repo, cleanup_repairs=repairs)
@@ -418,6 +557,7 @@ __all__ = [
     "iter_session_status_files",
     "iter_task_status_files",
     "list_backlog_tasks",
+    "migrate_task_job_ids",
     "prepare_task_resume",
     "task_cleanup",
 ]
