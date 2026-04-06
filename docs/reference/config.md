@@ -46,6 +46,7 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
 | --- | --- |
 | `trunk_branch` | Default branch for merges and base resolution |
 | `worktree_root` | Where Sponte creates task worktrees (relative to repo root unless absolute) |
+| `runtime_data` | Omit or any value other than `workspace` → runtime under `SPONTE_STATE_DIR` (default). `workspace` → logs, resume, plans, merge/selection locks, analytics under `.sponte/runtime/`. Overridden by `SPONTE_RUNTIME_DATA_IN_WORKSPACE`. |
 | `harness` | Built-in id or custom harness configuration from `init` |
 | `plan_model` / `execute_model` | Model strings interpreted by the harness |
 | `prompts` | Map of built-in prompt name → repo-relative markdown path (resolved at runtime; unknown keys are ignored). Active task-cycle prompt names include `plan`, `implement`, `improve`, `wrap_commit`, `verify`, and `agent_pick_task`. Notable: `agent_pick_task` — template for `sponte agent --auto` markdown-task selection (plan model); placeholders include `__BACKLOG_CANDIDATES__`, `__CLAIMED_TASKS__`, `__NEXT_TASK_FILE__`, `__TASKS_ROOT__`, and task-phase prompts also receive `__TASK_STATUS_FILE__`. |

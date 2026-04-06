@@ -3,7 +3,7 @@
 - Use `sponte` for the public CLI/package name. Internal Python modules still live under `ralph_focus/`.
 - Prefer `uv run pytest` for verification. Run focused tests while iterating, then the full suite before claiming completion.
 - Workspace-aware commands should usually be run with `--workspace /abs/path/to/workspace`.
-- In a target workspace, files under `.sponte/` are workspace-owned. Runtime state such as locks, logs, resume files, and handoffs lives outside the repo in Sponte app state.
+- In a target workspace, files under `.sponte/` are workspace-owned. By default, runtime data (merge/selection locks, logs, resume, plans, analytics, etc.) lives in Sponte app state; set `runtime_data` to `workspace` in `.sponte/settings.json` or `SPONTE_RUNTIME_DATA_IN_WORKSPACE=1` to keep that tree under `.sponte/runtime/` instead (still typically gitignored with `.sponte/`).
 - If the target workspace has its own instructions, including `AGENTS.md`, `CLAUDE.md`, or `.sponte/guardrails.md`, follow that workspace guidance instead. Treat this file as repo-level guidance for developing Sponte itself.
 
 ## Learned User Preferences
@@ -17,13 +17,12 @@
 - PyPI: push tag `v*` whose version (without `v`) matches `project.version` in `pyproject.toml`; `.github/workflows/publish.yml` builds with `uv build` and publishes via Trusted Publisher using GitHub environment `pypi` (one-time setup in README).
 - Cross-workspace app state paths and `SPONTE_STATE_DIR` are documented in README; on macOS the default base is under `~/Library/Application Support/sponte`.
 - Set `SPONTE_INIT_SKIP_HARNESS_PROBE=1` to skip harness and model probing during `sponte init` (e.g. tests or offline runs).
-- Git worktrees default under `.sponte/worktrees`; override with `worktree_root` in `.sponte/settings.json`.
-- Per-session resume and logs under app state use `runners/<id>/agent/`; legacy `auto-focus/` is still read for resume when the new path is absent.
+- Git worktrees default under `.sponte/worktrees` (override `worktree_root` in `.sponte/settings.json`). New task branches are `{work_kind}/{task_id}` and worktree directories `{work_kind}_{task_id}`; `work_kind` comes from `kind:` or `type:` in the task file (first lines), else the first meaningful path segment under `.sponte/tasks/` after skipping workflow stage folders, else `feat`.
+- Per-session resume and logs use `runners/<id>/agent/` under `ralph_data_dir` (app state or `.sponte/runtime/`); legacy `auto-focus/` is still read when the new path is absent. `session-resume` is keyed by resolved workspace root—use the same checkout path and `--workspace` as the original `sponte agent` run or resume files may be missing despite CLI hints.
 - Token rotation should refresh agent chat context inside the same Sponte session/loop; routine rotation should not require or suggest `sponte session-resume`.
 - Workspace `.sponte/settings.json` supports lifecycle `commands` (`install`, `dev`, `check`, `build`, `test`, `verify`); `sponte init` auto-detects defaults and docs position them as a token saver.
 - `sponte init` should add `.sponte/` to `.gitignore` before other init work; if `worktree_root` is outside `.sponte/`, ignore that path too.
-- `agent --auto` should choose among unlocked markdown files anywhere under `.sponte/tasks/`; do not rely on `priorities.md` or staged task folders.
-- `sponte agent` uses `--task`, `--resume-session`, and `--resume-task`; `--auto` requires an initialized task store and otherwise should point users to `sponte task-plan`.
-- App state for `session-resume` is keyed by resolved workspace root; use the same checkout path and `--workspace` convention as the original `sponte agent` run or resume files may be missing even when the CLI printed a resume hint.
+- `sponte agent` uses `--task`, `--resume-session`, and `--resume-task`; `--auto` requires an initialized task store or should point users to `sponte task-plan`, and warns then skips to the next pending task when picked-task setup fails before resume persists (e.g. stale git branch/worktree for that task).
+- Agent phases run the harness with cwd in the task git worktree, but task markdown, guardrails, progress, and related prompt paths resolve on the workspace root (primary) because `.sponte/` is usually gitignored and absent from worktrees.
 - Task `task_id` is path-derived (`t-` + hex); legacy title-based job folders can be renamed with `sponte task-cleanup --migrate-task-ids` when the task file still exists at `rel_task`. `cleanup_pending` defers pruning `.sponte/jobs/tasks/<task_id>/` after completion; `task-cleanup` retries that prune when the task file is gone.
-- Selectable tasks are `*.md` files anywhere under `.sponte/tasks/` (excluding `_tmp/` and `artifacts/` subtrees). `.sponte/locks/tasks.lock` lists claimed absolute paths (portability caveats in `docs/concepts/task-lock-caveats.md`). `.sponte/locks/merge.lock` serializes merge; backoff is configured with `merge_backoff_exponential` in `.sponte/settings.json`.
+- Selectable tasks are `*.md` files anywhere under `.sponte/tasks/` (excluding `_tmp/` and `artifacts/` subtrees); do not rely on `priorities.md` or staged-only folders for `--auto`. `.sponte/locks/tasks.lock` lists claimed absolute paths (portability caveats in `docs/concepts/task-lock-caveats.md`). `.sponte/locks/merge.lock` serializes merge; backoff is configured with `merge_backoff_exponential` in `.sponte/settings.json`.

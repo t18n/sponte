@@ -36,12 +36,16 @@ SPONTE_TASKS_PATH: str = TASKS_DIR
 SPONTE_WORKTREES_PATH: str = WORKTREE_BASE_DIR
 SPONTE_GUARDRAILS_PATH: str = f"{SPONTE_DIR}/{GUARDRAILS_BASENAME}"
 SPONTE_PROGRESS_PATH: str = f"{SPONTE_DIR}/{PROGRESS_BASENAME}"
+# Under ``.sponte/<segment>/`` when workspace-local runtime is enabled (``ralph_data_dir``).
+RUNTIME_DATA_SEGMENT: str = "runtime"
 
 # Legacy repo-relative paths (resume migration, merge precheck ignores)
 LEGACY_RALPH_DATA_DIR: str = ".agents/ralph/data"
 LEGACY_TASKS_DIR: str = ".agents/tasks"
 
-# --- Runtime under app state (see ralph_focus.app_state_paths); not a repo-relative path ---
+# --- Runtime data (app state by default; optional ``.sponte/<RUNTIME_DATA_SEGMENT>/``) ---
+# Default: ``SPONTE_STATE_DIR/workspaces/<slug>/`` (see ralph_focus.app_state_paths). Optional:
+# ``runtime_data: "workspace"`` in ``.sponte/settings.json`` or truthy ``SPONTE_RUNTIME_DATA_IN_WORKSPACE``.
 # Per-session logs/resume live under ``runners/<id>/agent/``. Legacy installs used ``auto-focus/``;
 # resume load still falls back there (see ``ralph_focus.resume``).
 AGENT_SESSION_SUBDIR: str = "agent"

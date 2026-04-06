@@ -251,11 +251,11 @@ def test_project_workspace_wraps_git_helpers(monkeypatch, tmp_path: Path) -> Non
 
 def test_run_state_store_uses_app_state_path_conventions(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "sponte-app-state"))
-    from ralph_focus.app_state_paths import workspace_runtime_root
     from ralph_focus.contracts import FileSystemRunStateStore
+    from ralph_focus.paths import ralph_data_dir
 
     store = FileSystemRunStateStore(tmp_path)
-    state_root = workspace_runtime_root(tmp_path)
+    state_root = ralph_data_dir(tmp_path)
 
     assert store.state_root() == state_root
     assert store.logs_dir(runner_id="lane-a") == (

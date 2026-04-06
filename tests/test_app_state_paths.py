@@ -37,11 +37,46 @@ def test_workspace_runtime_root_differs_for_different_roots(tmp_path: Path, monk
 
 def test_ralph_data_dir_matches_workspace_runtime_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.delenv("SPONTE_RUNTIME_DATA_IN_WORKSPACE", raising=False)
     from ralph_focus.app_state_paths import workspace_runtime_root
     from ralph_focus.paths import ralph_data_dir
 
     ws = tmp_path / "repo"
     assert ralph_data_dir(ws) == workspace_runtime_root(ws)
+
+
+def test_ralph_data_dir_under_sponte_runtime_when_env_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setenv("SPONTE_RUNTIME_DATA_IN_WORKSPACE", "1")
+    from config.defaults import RUNTIME_DATA_SEGMENT, SPONTE_DIR
+    from ralph_focus.paths import ralph_data_dir
+
+    repo = tmp_path / "repo"
+    assert ralph_data_dir(repo) == repo / SPONTE_DIR / RUNTIME_DATA_SEGMENT
+
+
+def test_ralph_data_dir_under_sponte_runtime_from_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.delenv("SPONTE_RUNTIME_DATA_IN_WORKSPACE", raising=False)
+    from config.defaults import RUNTIME_DATA_SEGMENT, SPONTE_DIR
+    from ralph_focus.paths import ralph_data_dir
+    from ralph_focus.workspace_settings import WorkspaceSettings, save_workspace_settings
+
+    repo = tmp_path / "repo"
+    save_workspace_settings(repo, WorkspaceSettings(runtime_data="workspace"))
+    assert ralph_data_dir(repo) == repo / SPONTE_DIR / RUNTIME_DATA_SEGMENT
+
+
+def test_sponte_runtime_data_env_false_overrides_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setenv("SPONTE_RUNTIME_DATA_IN_WORKSPACE", "0")
+    from ralph_focus.app_state_paths import workspace_runtime_root
+    from ralph_focus.paths import ralph_data_dir
+    from ralph_focus.workspace_settings import WorkspaceSettings, save_workspace_settings
+
+    repo = tmp_path / "repo"
+    save_workspace_settings(repo, WorkspaceSettings(runtime_data="workspace"))
+    assert ralph_data_dir(repo) == workspace_runtime_root(repo)
 
 
 def test_guardrails_path_under_workspace_sponte(tmp_path: Path) -> None:

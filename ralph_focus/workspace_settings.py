@@ -134,6 +134,8 @@ def merge_command_settings(
 class WorkspaceSettings:
     trunk_branch: str = DEFAULT_TRUNK_BRANCH
     worktree_root: str = DEFAULT_WORKTREE_ROOT
+    # "" or unknown → app state; "workspace" → ``.sponte/<runtime>/`` (see ``ralph_focus.paths.ralph_data_dir``).
+    runtime_data: str = ""
     harness: str = ""
     plan_model: str = ""
     execute_model: str = ""
@@ -212,6 +214,7 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
     custom_raw = raw.get("custom_harness")
     commands_raw = raw.get("commands")
     merge_backoff_raw = raw.get("merge_backoff_exponential")
+    runtime_data_raw = raw.get("runtime_data")
 
     guardrails_path = ""
     if isinstance(guardrails, dict):
@@ -227,6 +230,10 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
     if isinstance(merge_backoff_raw, dict):
         merge_backoff = dict(merge_backoff_raw)
 
+    runtime_data = ""
+    if isinstance(runtime_data_raw, str) and runtime_data_raw.strip().lower() == "workspace":
+        runtime_data = "workspace"
+
     return WorkspaceSettings(
         trunk_branch=trunk.strip() if isinstance(trunk, str) and trunk.strip() else DEFAULT_TRUNK_BRANCH,
         worktree_root=(
@@ -234,6 +241,7 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
             if isinstance(worktree_root, str) and worktree_root.strip()
             else DEFAULT_WORKTREE_ROOT
         ),
+        runtime_data=runtime_data,
         harness=harness.strip() if isinstance(harness, str) else "",
         plan_model=plan_model.strip() if isinstance(plan_model, str) else "",
         execute_model=execute_model.strip() if isinstance(execute_model, str) else "",
@@ -282,6 +290,8 @@ def save_workspace_settings(root: Path, settings: WorkspaceSettings) -> None:
         payload["custom_harness"] = custom_payload
     if settings.merge_backoff_exponential:
         payload["merge_backoff_exponential"] = settings.merge_backoff_exponential
+    if settings.runtime_data.strip().lower() == "workspace":
+        payload["runtime_data"] = "workspace"
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 

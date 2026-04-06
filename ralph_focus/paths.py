@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -13,10 +14,12 @@ from config.defaults import (
     LEGACY_RALPH_DATA_DIR,
     NEXT_TASK_FILENAME,
     PROGRESS_BASENAME,
+    RUNTIME_DATA_SEGMENT,
     SPONTE_DIR,
     WORKTREE_BASE_DIR,
 )
 from ralph_focus.app_state_paths import workspace_runtime_root
+from ralph_focus.workspace_settings import load_workspace_settings
 
 
 def workspace_sponte_dir(root: Path) -> Path:
@@ -31,13 +34,25 @@ def progress_markdown_path(root: Path) -> Path:
     return root / SPONTE_DIR / PROGRESS_BASENAME
 
 
+def use_workspace_runtime_data(workspace_root: Path) -> bool:
+    """True when logs, resume, plans, locks, etc. live under ``.sponte/<runtime>/`` instead of app state."""
+    flag = os.environ.get("SPONTE_RUNTIME_DATA_IN_WORKSPACE", "").strip().lower()
+    if flag in ("1", "true", "yes"):
+        return True
+    if flag in ("0", "false", "no"):
+        return False
+    return load_workspace_settings(workspace_root).runtime_data.strip().lower() == "workspace"
+
+
 def ralph_data_dir(workspace_root: Path) -> Path:
-    """Runtime data directory for this workspace (under Sponte app state, not in the repo)."""
+    """Runtime data directory: Sponte app state by default, or workspace-local ``.sponte/<runtime>/``."""
+    if use_workspace_runtime_data(workspace_root):
+        return workspace_sponte_dir(workspace_root) / RUNTIME_DATA_SEGMENT
     return workspace_runtime_root(workspace_root)
 
 
 def ralph_lock_path(primary: Path) -> Path:
-    """Session marker for the active auto-focus run (app state, gitignored only by omission from repo)."""
+    """Session marker for the active auto-focus run (under ``ralph_data_dir``)."""
     return ralph_data_dir(primary) / "ralph.lock"
 
 
@@ -124,7 +139,7 @@ def next_task_file(primary: Path) -> Path:
 
 
 def plans_dir(workspace_root: Path) -> Path:
-    """Plan files live under app state; *workspace_root* must be the primary checkout root."""
+    """Plan files live under ``ralph_data_dir``; *workspace_root* must be the primary checkout root."""
     return ralph_data_dir(workspace_root) / "plans"
 
 
@@ -220,7 +235,7 @@ def workspace_task_claim_lock_path(root: Path, task_id: str) -> Path:
 
 
 def naming_reply_file(workspace_root: Path, task_id: str) -> Path:
-    """App-state file where the task naming prompt writes one JSON object."""
+    """Where the task naming prompt writes one JSON object (under ``ralph_data_dir``)."""
     return ralph_data_dir(workspace_root) / "naming" / f"{sanitize_job_segment(task_id)}.json"
 
 

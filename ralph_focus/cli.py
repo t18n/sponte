@@ -39,7 +39,7 @@ from ralph_focus.cycle import (
 )
 from ralph_focus.failure_detection import FailureKind
 from ralph_focus.interactive_setup import resolve_choice_index
-from ralph_focus.paths import rotation_handoff_file
+from ralph_focus.paths import rotation_handoff_file, use_workspace_runtime_data
 from ralph_focus.preflight import run_preflight
 from ralph_focus.progress import cycle_line
 from ralph_focus.ralph_session_lock import (
@@ -1514,6 +1514,12 @@ def cmd_config_show(
     t.add_row("File", str(path) if path.is_file() else f"{path} (missing)")
     t.add_row("trunk_branch", ws.normalized_trunk())
     t.add_row("worktree_root", ws.normalized_worktree_root())
+    rd_file = ws.runtime_data.strip().lower()
+    t.add_row("runtime_data (file)", rd_file if rd_file == "workspace" else "(default → app state)")
+    t.add_row(
+        "runtime_data (effective)",
+        "workspace (.sponte/runtime)" if use_workspace_runtime_data(primary) else "app_state",
+    )
     t.add_row("harness", ws.resolved_harness_id())
     t.add_row("plan_model", ws.resolved_plan_model())
     t.add_row("execute_model", ws.resolved_execute_model())

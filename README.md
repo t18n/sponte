@@ -135,16 +135,18 @@ Git ignore rules:
 - If `worktree_root` is outside `.sponte/`, that path is appended as well.
 - To version parts of `.sponte/` (for example settings or tasks), add them with `git add -f` or adjust `.gitignore`.
 
-Cross-workspace runtime state lives outside the repo checkout:
+By default, cross-workspace runtime state lives outside the repo checkout:
 
 - known workspace registry
 - resume files
-- locks
+- locks (merge/selection/agent-pick; not `.sponte/locks/` task claims)
 - logs
 - rotation handoffs
 - next-task files
 
-Default app-state locations:
+Optional **workspace-local** runtime: set `"runtime_data": "workspace"` in `.sponte/settings.json` or export `SPONTE_RUNTIME_DATA_IN_WORKSPACE=1` to store that tree under `.sponte/runtime/` (alongside tasks and settings; still gitignored by default with `.sponte/`). Use `SPONTE_RUNTIME_DATA_IN_WORKSPACE=0` to force app state even when the file requests workspace mode.
+
+Default app-state locations (when not using workspace-local runtime):
 
 - macOS: `~/Library/Application Support/sponte`
 - Linux/XDG: `$XDG_STATE_HOME/sponte` or `~/.local/state/sponte`
@@ -152,6 +154,7 @@ Default app-state locations:
 
 Other environment variables:
 
+- `SPONTE_RUNTIME_DATA_IN_WORKSPACE`: when truthy (`1`, `true`, `yes`), store Sponte runtime data under `.sponte/runtime/`; when `0`/`false`/`no`, force app state even if settings request workspace mode.
 - `RALPH_VERIFY_COMMANDS`: `;;`-separated shell commands injected into verify-related agent prompts when `.sponte/settings.json` has no non-empty `commands.verify` list. Per-workspace `commands.verify` overrides this when set.
 
 ## Init Flow

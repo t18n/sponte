@@ -1,4 +1,4 @@
-"""Append-only per-workspace analytics under Sponte app state."""
+"""Append-only per-workspace analytics under ``ralph_data_dir``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ralph_focus.app_state_paths import workspace_runtime_root
+from ralph_focus.paths import ralph_data_dir
 
 
 def _utc_iso() -> str:
@@ -16,7 +16,7 @@ def _utc_iso() -> str:
 
 
 def analytics_dir(workspace_root: Path) -> Path:
-    return workspace_runtime_root(workspace_root) / "analytics"
+    return ralph_data_dir(workspace_root) / "analytics"
 
 
 def analytics_summary_path(workspace_root: Path) -> Path:
