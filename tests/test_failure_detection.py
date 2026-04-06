@@ -1,5 +1,4 @@
 from config.defaults import NO_PROGRESS_LOOPS_MAX
-from config.defaults import NO_PROGRESS_LOOPS_MAX
 from ralph_focus.failure_detection import FailureKind, ProgressSnapshot, classify_agent_failure
 
 
@@ -44,8 +43,8 @@ def test_repeated_no_progress_is_classified_as_gutter() -> None:
         "agent produced no useful changes",
         "no files changed",
         no_progress_streak=NO_PROGRESS_LOOPS_MAX,
-        before=ProgressSnapshot(pending_count=4, dirty=False, head="abc"),
-        after=ProgressSnapshot(pending_count=4, dirty=False, head="abc"),
+        before=ProgressSnapshot(pending_count=4, head="abc", worktree_fingerprint=""),
+        after=ProgressSnapshot(pending_count=4, head="abc", worktree_fingerprint=""),
     )
 
     assert result.kind is FailureKind.GUTTER
@@ -56,8 +55,20 @@ def test_repeated_no_progress_uses_configured_threshold() -> None:
         "agent produced no useful changes",
         "no files changed",
         no_progress_streak=NO_PROGRESS_LOOPS_MAX,
-        before=ProgressSnapshot(pending_count=4, dirty=False, head="abc"),
-        after=ProgressSnapshot(pending_count=4, dirty=False, head="abc"),
+        before=ProgressSnapshot(pending_count=4, head="abc", worktree_fingerprint=""),
+        after=ProgressSnapshot(pending_count=4, head="abc", worktree_fingerprint=""),
     )
 
     assert result.kind is FailureKind.GUTTER
+
+
+def test_repeated_no_progress_not_gutter_when_worktree_fingerprint_changes() -> None:
+    result = classify_agent_failure(
+        "agent failed",
+        "model exited non-zero",
+        no_progress_streak=NO_PROGRESS_LOOPS_MAX,
+        before=ProgressSnapshot(pending_count=4, head="abc", worktree_fingerprint=" M a.txt"),
+        after=ProgressSnapshot(pending_count=4, head="abc", worktree_fingerprint=" M b.txt"),
+    )
+
+    assert result.kind is FailureKind.FATAL

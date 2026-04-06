@@ -18,8 +18,8 @@ class FailureKind(str, Enum):
 @dataclass(frozen=True)
 class ProgressSnapshot:
     pending_count: int
-    dirty: bool
     head: str
+    worktree_fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -63,8 +63,8 @@ def classify_agent_failure(
         and before is not None
         and after is not None
         and before.pending_count == after.pending_count
-        and before.dirty == after.dirty
         and before.head == after.head
+        and before.worktree_fingerprint == after.worktree_fingerprint
     ):
         return FailureClassification(
             FailureKind.GUTTER,

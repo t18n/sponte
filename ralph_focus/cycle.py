@@ -601,14 +601,18 @@ def _log_tail(logf: Path, *, lines: int = 80) -> str:
     return "\n".join(raw_lines[-lines:])
 
 
+def _worktree_fingerprint(wt_path: Path) -> str:
+    code, out, _ = git(wt_path, "status", "--porcelain=v1")
+    return out if code == 0 else ""
+
+
 def _progress_snapshot(wt_path: Path, rel_task: str) -> ProgressSnapshot:
     pending, _done = count_checklist(wt_path / rel_task)
-    dirty = not worktree_clean(wt_path)
     code, head, _ = git(wt_path, "rev-parse", "HEAD")
     return ProgressSnapshot(
         pending_count=pending,
-        dirty=dirty,
         head=head.strip() if code == 0 else "",
+        worktree_fingerprint=_worktree_fingerprint(wt_path),
     )
 
 
@@ -655,8 +659,8 @@ def _run_phase_agent(
 
     made_progress = (
         before.pending_count != after.pending_count
-        or before.dirty != after.dirty
         or before.head != after.head
+        or before.worktree_fingerprint != after.worktree_fingerprint
     )
     if phase in ("IMPLEMENT", "IMPROVE_EXECUTE"):
         if made_progress:

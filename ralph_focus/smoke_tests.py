@@ -338,8 +338,8 @@ def _test_failure_classification() -> None:
         "agent made no progress",
         "no files changed",
         no_progress_streak=NO_PROGRESS_LOOPS_MAX,
-        before=ProgressSnapshot(pending_count=2, dirty=False, head="abc"),
-        after=ProgressSnapshot(pending_count=2, dirty=False, head="abc"),
+        before=ProgressSnapshot(pending_count=2, head="abc", worktree_fingerprint=""),
+        after=ProgressSnapshot(pending_count=2, head="abc", worktree_fingerprint=""),
     )
     assert gutter.kind is FailureKind.GUTTER
 

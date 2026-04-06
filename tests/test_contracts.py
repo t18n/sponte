@@ -136,8 +136,8 @@ def test_strategy_harness_adapter_classifies_failures_with_existing_logic() -> N
             summary="run failed",
             detail="request timed out",
             no_progress_streak=0,
-            before=ProgressSnapshot(pending_count=2, dirty=False, head="abc"),
-            after=ProgressSnapshot(pending_count=2, dirty=False, head="abc"),
+            before=ProgressSnapshot(pending_count=2, head="abc", worktree_fingerprint=""),
+            after=ProgressSnapshot(pending_count=2, head="abc", worktree_fingerprint=""),
         )
     )
 
