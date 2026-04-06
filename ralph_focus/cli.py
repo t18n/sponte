@@ -42,10 +42,11 @@ from ralph_focus.ralph_session_lock import (
     finalize_ralph_lock_if_session_idle,
     write_ralph_lock,
 )
+from ralph_focus.guardrails.paths import PathGuardError, validate_task_path_argument
 from ralph_focus.resume import ResumeState, clear_resume as resume_clear_state
 from ralph_focus.resume import (
     load_resume,
-    resolve_runner_for_worktree,
+    resolve_runner_for_task_id,
     resume_path,
 )
 from ralph_focus.session_stats import SessionStats
@@ -80,6 +81,7 @@ from ralph_focus.tasks import (
     priority_task_paths_pending,
     priorities_file,
     task_label,
+    task_root,
 )
 from ralph_focus.workspace_analytics import (
     bump_summary,
@@ -291,7 +293,7 @@ def _print_auto_focus_settings(
     task_arg: str,
     resuming: bool,
     runner_id: str,
-    complete_worktree_mode: bool = False,
+    resume_task_recovery_mode: bool = False,
 ) -> None:
     t = Table(title="Sponte agent — session settings")
     t.add_column("Setting")
@@ -330,8 +332,8 @@ def _print_auto_focus_settings(
     t.add_row("Allow agent task pick", "yes" if allow_agent_pick else "no")
     t.add_row("Explicit task", task_arg if task_arg else f"(from {TASKS_DIR}/priorities.md)")
     t.add_row("Resuming prior cycle", "yes" if resuming else "no")
-    if complete_worktree_mode:
-        t.add_row("Orphan worktree recovery", "single cycle then exit")
+    if resume_task_recovery_mode:
+        t.add_row("Task-scoped recovery", "single cycle then exit")
     t.add_row("Session id", runner_id)
     if not session_deadline_epoch:
         t.add_row(
@@ -494,8 +496,15 @@ def cmd_agent(
         str | None,
         typer.Option("--trunk-branch", help="Override workspace trunk branch for worktrees/merges"),
     ] = None,
-    task: Annotated[str | None, typer.Argument(help="Optional .sponte/tasks/… path")] = None,
-    agent: Annotated[
+    task_path: Annotated[
+        str | None,
+        typer.Option(
+            "--task",
+            metavar="PATH",
+            help="Absolute or repo-relative path to a task file under .sponte/tasks/",
+        ),
+    ] = None,
+    agent_harness: Annotated[
         str | None,
         typer.Option(
             "--agent",
@@ -528,10 +537,17 @@ def cmd_agent(
         str | None,
         typer.Option(
             "--extend-duration",
-            help="Only with --resume: add wall time after max(now, stored deadline); ignored otherwise",
+            help="Only with --resume-session: add wall time after max(now, stored deadline); ignored otherwise",
         ),
     ] = None,
     unlimited: Annotated[bool, typer.Option("--unlimited", help="No session wall-clock limit (default without --max-duration)")] = False,
+    auto_pick: Annotated[
+        bool,
+        typer.Option(
+            "--auto",
+            help="Pick next pending task from priorities.md, then backlog (requires initialized task store)",
+        ),
+    ] = False,
     allow_agent_pick: Annotated[
         bool | None,
         typer.Option(
@@ -544,20 +560,20 @@ def cmd_agent(
         str | None,
         typer.Option("--progress", help="off | on | full (full = tee agent to terminal)"),
     ] = None,
-    resume: Annotated[
+    resume_session: Annotated[
         str | None,
         typer.Option(
-            "--resume",
+            "--resume-session",
             metavar="SESSION_ID",
-            help="Session id to resume (same stored session id used by session-resume)",
+            help="Resume this session id (same id as session-resume / job status)",
         ),
     ] = None,
-    complete_worktree: Annotated[
+    resume_task_id: Annotated[
         str | None,
         typer.Option(
-            "--complete-worktree",
-            metavar="PATH",
-            help="Resume from saved state for this worktree path; run exactly one cycle and exit",
+            "--resume-task",
+            metavar="TASK_ID",
+            help="Resume saved state for this task_id; run exactly one cycle and exit",
         ),
     ] = None,
     clear_resume_id: Annotated[
@@ -572,7 +588,7 @@ def cmd_agent(
         str | None,
         typer.Option(
             "--runner-id",
-            help="Stable session id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume / --complete-worktree",
+            help="Stable session id for new sessions (default: random rap-… or RALPH_RUNNER_ID); not with --resume-session / --resume-task",
         ),
     ] = None,
     skip_preflight: Annotated[bool, typer.Option("--skip-preflight", hidden=True)] = False,
@@ -583,26 +599,28 @@ def cmd_agent(
         interactive=_cli_allows_prompts(),
     )
 
-    resume_runner = resume.strip() if resume else ""
-    if resume is not None and not resume_runner:
-        console.print("[red]--resume requires a non-empty session id (e.g. --resume lane-a)[/red]")
+    resume_session_val = (resume_session or "").strip() if resume_session is not None else ""
+    if resume_session is not None and not resume_session_val:
+        console.print(
+            "[red]--resume-session requires a non-empty session id (e.g. --resume-session lane-a)[/red]"
+        )
         raise typer.Exit(1)
-    resume_id: str | None = resume_runner if resume_runner else None
+    resume_id: str | None = resume_session_val if resume_session_val else None
 
-    cwt_arg = ""
-    if complete_worktree is not None:
-        cwt_arg = complete_worktree.strip()
-        if not cwt_arg:
-            console.print("[red]--complete-worktree requires a non-empty worktree path[/red]")
+    resume_task_arg = ""
+    if resume_task_id is not None:
+        resume_task_arg = resume_task_id.strip()
+        if not resume_task_arg:
+            console.print("[red]--resume-task requires a non-empty task id[/red]")
             raise typer.Exit(1)
         if resume_id is not None:
-            console.print("[red]Do not combine --complete-worktree with --resume[/red]")
+            console.print("[red]Do not combine --resume-task with --resume-session[/red]")
             raise typer.Exit(1)
-        if task:
-            console.print("[red]Do not pass a task path with --complete-worktree[/red]")
+        if task_path:
+            console.print("[red]Do not pass --task with --resume-task[/red]")
             raise typer.Exit(1)
         if runner_id is not None:
-            console.print("[red]Do not combine --complete-worktree with --runner-id[/red]")
+            console.print("[red]Do not combine --resume-task with --runner-id[/red]")
             raise typer.Exit(1)
 
     clear_runner = clear_resume_id.strip() if clear_resume_id else ""
@@ -610,11 +628,11 @@ def cmd_agent(
         console.print("[red]--clear-resume requires a non-empty session id[/red]")
         raise typer.Exit(1)
     if clear_runner:
-        if cwt_arg:
-            console.print("[red]Do not combine --complete-worktree with --clear-resume[/red]")
+        if resume_task_arg:
+            console.print("[red]Do not combine --resume-task with --clear-resume[/red]")
             raise typer.Exit(1)
         if resume_id is not None:
-            console.print("[red]Do not combine --resume with --clear-resume[/red]")
+            console.print("[red]Do not combine --resume-session with --clear-resume[/red]")
             raise typer.Exit(1)
         resume_clear_state(primary, runner_id=clear_runner)
         clear_ralph_lock_matching_runner(primary, clear_runner)
@@ -622,31 +640,50 @@ def cmd_agent(
         raise typer.Exit(0)
 
     if resume_id is not None and runner_id is not None:
-        console.print("[red]Do not combine --resume SESSION_ID with --runner-id; the resumed session already supplies the id[/red]")
+        console.print(
+            "[red]Do not combine --resume-session with --runner-id; the resumed session already supplies the id[/red]"
+        )
         raise typer.Exit(1)
 
-    if resume_id is None and not cwt_arg and not task:
+    if auto_pick and task_path:
+        console.print("[red]Do not pass --task with --auto[/red]")
+        raise typer.Exit(1)
+    if auto_pick and resume_id is not None:
+        console.print("[red]Do not combine --auto with --resume-session[/red]")
+        raise typer.Exit(1)
+    if auto_pick and resume_task_arg:
+        console.print("[red]Do not combine --auto with --resume-task[/red]")
+        raise typer.Exit(1)
+
+    if resume_id is None and not resume_task_arg and not task_path and not auto_pick:
         console.print(
-            "[red]`sponte agent` requires a task path, `--resume`, or `--complete-worktree`. "
+            "[red]`sponte agent` requires `--task`, `--resume-session`, `--resume-task`, or `--auto`. "
             "Use `sponte task-plan` to create tasks first.[/red]"
         )
         raise typer.Exit(1)
-    if resume_id is None and not cwt_arg:
+    if resume_id is None and not resume_task_arg:
         primary = resolve_primary_workspace(
             primary,
             console=console,
             interactive=False,
         )
 
+    if auto_pick:
+        if not (primary / task_root(primary)).is_dir():
+            console.print(
+                "[red]No task store in this workspace. Run `sponte init` if needed, then `sponte task-plan` "
+                "to create tasks under `.sponte/tasks/`.[/red]"
+            )
+            raise typer.Exit(1)
+
     ws = load_workspace_settings(primary)
 
     loaded_resume_state: ResumeState | None = None
-    if cwt_arg:
-        wt_resolved = Path(cwt_arg).expanduser().resolve()
-        pair = resolve_runner_for_worktree(primary, wt_resolved)
+    if resume_task_arg:
+        pair = resolve_runner_for_task_id(primary, resume_task_arg)
         if pair is None:
             console.print(
-                "[red]No unique saved resume state for that worktree under this workspace.[/red]"
+                "[red]No unique saved resume state for that task_id under this workspace.[/red]"
             )
             raise typer.Exit(1)
         resume_session_id, _ = pair
@@ -658,11 +695,11 @@ def cmd_agent(
 
     runner_id_effective = resume_id if resume_id is not None else _effective_runner_id(runner_id)
 
-    if resume_id is not None and task:
-        console.print("[red]Do not pass a task path when resuming (--resume / --complete-worktree)[/red]")
+    if resume_id is not None and task_path:
+        console.print("[red]Do not pass --task when resuming (--resume-session / --resume-task)[/red]")
         raise typer.Exit(1)
 
-    if resume_id is not None and not cwt_arg:
+    if resume_id is not None and not resume_task_arg:
         loaded_resume_state = load_resume(
             primary,
             runner_id=runner_id_effective,
@@ -671,10 +708,23 @@ def cmd_agent(
             console.print("[red]Nothing to resume[/red]")
             raise typer.Exit(1)
 
+    task_arg_normalized = ""
+    if task_path is not None:
+        raw_tp = task_path.strip()
+        if not raw_tp:
+            console.print("[red]--task requires a non-empty path[/red]")
+            raise typer.Exit(1)
+        try:
+            tp_abs = validate_task_path_argument(primary, raw_tp)
+        except PathGuardError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from e
+        task_arg_normalized = tp_abs.resolve().relative_to(primary.resolve()).as_posix()
+
     if allow_agent_pick is not None:
         allow_agent_pick_effective: bool = allow_agent_pick
     else:
-        allow_agent_pick_effective = (resume_id is None) and (task is None)
+        allow_agent_pick_effective = (resume_id is None) and (task_path is None)
 
     pm: ProgressMode
     if progress is None:
@@ -687,7 +737,7 @@ def cmd_agent(
 
     if loaded_resume_state is not None:
         ak = (loaded_resume_state.agent_kind or "").strip()
-        effective_agent = ak or (agent if agent is not None else ws.resolved_harness_id())
+        effective_agent = ak or (agent_harness if agent_harness is not None else ws.resolved_harness_id())
         pm_saved = (loaded_resume_state.plan_model or "").strip()
         effective_plan_model = pm_saved or (plan_model if plan_model is not None else ws.resolved_plan_model())
         am_saved = (loaded_resume_state.agent_model or "").strip()
@@ -695,11 +745,11 @@ def cmd_agent(
         effective_allow_agent_pick = loaded_resume_state.allow_agent_pick.lower() == "true"
         effective_task_arg = loaded_resume_state.task_arg
     else:
-        effective_agent = agent if agent is not None else ws.resolved_harness_id()
+        effective_agent = agent_harness if agent_harness is not None else ws.resolved_harness_id()
         effective_plan_model = plan_model if plan_model is not None else ws.resolved_plan_model()
         effective_execute_model = execute_model if execute_model is not None else ws.resolved_execute_model()
         effective_allow_agent_pick = allow_agent_pick_effective
-        effective_task_arg = task or ""
+        effective_task_arg = task_arg_normalized
 
     if not skip_preflight:
         run_preflight(
@@ -711,14 +761,14 @@ def cmd_agent(
 
     harness = resolve_harness(primary, effective_agent)
 
-    complete_worktree_mode = bool(cwt_arg)
+    resume_task_recovery_mode = bool(resume_task_arg)
 
     mc = max_cycles
-    if once or complete_worktree_mode:
+    if once or resume_task_recovery_mode:
         mc = 1
 
     duration_sec: int | None
-    if unlimited or once or complete_worktree_mode:
+    if unlimited or once or resume_task_recovery_mode:
         duration_sec = None
     elif max_duration:
         duration_sec = parse_duration_to_seconds(max_duration)
@@ -760,7 +810,7 @@ def cmd_agent(
         st = loaded_resume_state
         assert st is not None
         cycles_done = st.cycles_done
-        if complete_worktree_mode:
+        if resume_task_recovery_mode:
             cfg.session_deadline_epoch = ""
         else:
             cfg.session_deadline_epoch = compute_resumed_deadline(
@@ -837,12 +887,12 @@ def cmd_agent(
         task_arg=effective_task_arg,
         resuming=use_resume_flag,
         runner_id=runner_id_effective,
-        complete_worktree_mode=complete_worktree_mode,
+        resume_task_recovery_mode=resume_task_recovery_mode,
     )
 
     try:
         while True:
-            cycles_done_for_limit = invocation_cycles_done if complete_worktree_mode else cycles_done
+            cycles_done_for_limit = invocation_cycles_done if resume_task_recovery_mode else cycles_done
             if mc is not None and cycles_done_for_limit >= mc:
                 stats.exit_reason = "max_cycles"
                 break
@@ -1009,12 +1059,12 @@ def _print_session_summary(stats: SessionStats, *, deadline_hit: bool, runner_id
         console.print("[dim]Session wall-clock limit reached.[/dim]")
 
 
-def _invoke_agent_minimal(*, workspace: Path | None, resume: str) -> None:
+def _invoke_agent_minimal(*, workspace: Path | None, resume_session: str) -> None:
     cmd_agent(
         workspace=workspace,
         trunk_branch=None,
-        task=None,
-        agent=None,
+        task_path=None,
+        agent_harness=None,
         plan_model=None,
         execute_model=None,
         rotate_threshold_tokens=None,
@@ -1024,11 +1074,12 @@ def _invoke_agent_minimal(*, workspace: Path | None, resume: str) -> None:
         max_duration=None,
         extend_duration=None,
         unlimited=False,
+        auto_pick=False,
         allow_agent_pick=None,
         cleanup_on_exit=False,
         progress=None,
-        resume=resume,
-        complete_worktree=None,
+        resume_session=resume_session,
+        resume_task_id=None,
         clear_resume_id=None,
         runner_id=None,
         skip_preflight=False,
@@ -1051,7 +1102,7 @@ def cmd_session_resume(
         typer.Option("--workspace", "-w", help="Git checkout root"),
     ] = None,
 ) -> None:
-    _invoke_agent_minimal(workspace=workspace, resume=session_id)
+    _invoke_agent_minimal(workspace=workspace, resume_session=session_id)
 
 
 @app.command("task-resume", help="New session that resumes work on task_id.")
@@ -1068,7 +1119,7 @@ def cmd_task_resume(
         console.print(f"[red]{err}[/red]")
         raise typer.Exit(1)
     console.print(f"[green]New session[/green] {new_sid} [dim]for task[/dim] {task_id}")
-    _invoke_agent_minimal(workspace=workspace, resume=new_sid)
+    _invoke_agent_minimal(workspace=workspace, resume_session=new_sid)
 
 
 @app.command("task-cancel", help="Abandon active task: remove worktree, clear locks, return task to backlog.")

@@ -28,10 +28,10 @@ Add one or more backlog tasks. Optionally edit markdown under `.sponte/tasks/bac
 ## Run an agent session
 
 ```bash
-sponte agent --workspace /path/to/repo .sponte/tasks/backlog/my-task.md
+sponte agent --workspace /path/to/repo --task /path/to/repo/.sponte/tasks/backlog/my-task.md
 ```
 
-Or let the session pick from priorities when configured. Use `sponte status` and `sponte task-current` to see ownership.
+Or use `sponte agent --workspace /path/to/repo --auto` so Sponte picks the next pending task from `priorities.md` (requires an existing `.sponte/tasks/` tree). Use `sponte status` and `sponte task-current` to see ownership.
 
 ## Learn more
 

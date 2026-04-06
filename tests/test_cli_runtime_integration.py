@@ -51,20 +51,26 @@ def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Pa
 
     def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
         seen["cfg"] = cfg
+        seen["task_arg_at_cycle"] = cfg.task_arg
         seen["use_resume"] = use_resume
         seen["resume_state"] = resume_state
         return 0
 
     monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
 
+    task_file = tmp_path / TASKS_DIR / "backlog" / "example.md"
+    task_file.parent.mkdir(parents=True)
+    task_file.touch()
+
     runner = CliRunner()
     result = runner.invoke(
         cli.app,
         [
             "agent",
-            f"{TASKS_DIR}/backlog/example.md",
             "--once",
             "--skip-preflight",
+            "--task",
+            str(task_file),
             "--agent",
             "cursor",
         ],
@@ -75,6 +81,7 @@ def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Pa
     assert seen["resume_state"] is None
     assert seen["cfg"].harness is harness
     assert seen["cfg"].runner_id == "rap-test1234"
+    assert seen["task_arg_at_cycle"] == f"{TASKS_DIR}/backlog/example.md"
 
 
 def test_auto_focus_requires_explicit_task_or_resume(monkeypatch, tmp_path: Path) -> None:
@@ -88,9 +95,92 @@ def test_auto_focus_requires_explicit_task_or_resume(monkeypatch, tmp_path: Path
     result = runner.invoke(cli.app, ["agent", "--once"])
 
     assert result.exit_code != 0
-    output = (result.stdout + result.stderr).lower()
-    assert "requires a task path" in output
-    assert "sponte task-plan" in output
+    out = result.stdout + result.stderr
+    assert "`--task`" in out
+    assert "sponte task-plan" in out.lower()
+
+
+def test_auto_focus_auto_allows_empty_task_path(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+    from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
+
+    class _Harness:
+        id = "cursor"
+        display_name = "Cursor"
+        capabilities = HarnessCapabilities()
+
+        def availability(self) -> AvailabilityReport:
+            return AvailabilityReport(available=True)
+
+        def prepare(self, request: RunRequest) -> RunRequest:
+            return request
+
+        def run(self, request: RunRequest) -> RunResult:
+            return RunResult(exit_code=0, usage={})
+
+    harness = _Harness()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
+    monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "get_strategy",
+        lambda _p, _name: (_ for _ in ()).throw(AssertionError("cli should use resolve_harness")),
+        raising=False,
+    )
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: harness, raising=False)
+
+    def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
+        seen["cfg"] = cfg
+        seen["use_resume"] = use_resume
+        seen["resume_state"] = resume_state
+        return 0
+
+    monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
+
+    (tmp_path / TASKS_DIR).mkdir(parents=True)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "agent",
+            "--auto",
+            "--once",
+            "--skip-preflight",
+            "--agent",
+            "cursor",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["use_resume"] is False
+    assert seen["resume_state"] is None
+    assert seen["cfg"].task_arg == ""
+    assert seen["cfg"].allow_agent_pick is True
+
+
+def test_auto_pick_exits_when_task_store_missing(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should stop before preflight")))
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["agent", "--auto", "--once"])
+
+    assert result.exit_code == 1
+    out = (result.stdout + result.stderr).lower()
+    assert "no task store" in out
+    assert "task-plan" in out
 
 
 def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_config(monkeypatch, tmp_path: Path) -> None:
@@ -150,7 +240,7 @@ def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_confi
         [
             "agent",
             "--once",
-            "--resume",
+            "--resume-session",
             "lane-a",
             "--agent",
             "cursor",
@@ -218,7 +308,7 @@ def test_auto_focus_resume_prints_restored_task_pick_settings(monkeypatch, tmp_p
         [
             "agent",
             "--once",
-            "--resume",
+            "--resume-session",
             "lane-a",
             "--no-allow-agent-pick",
         ],
@@ -229,7 +319,7 @@ def test_auto_focus_resume_prints_restored_task_pick_settings(monkeypatch, tmp_p
     assert seen["task_arg"] == f"{TASKS_DIR}/in-progress/resumed.md"
 
 
-def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_path: Path) -> None:
+def test_auto_focus_resume_task_runs_single_resume_cycle(monkeypatch, tmp_path: Path) -> None:
     from ralph_focus import cli
     from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
 
@@ -249,12 +339,14 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
 
     wt = tmp_path / ".sponte" / "worktrees" / "orphan"
     wt.mkdir(parents=True)
+    task_job_id = "orphan-task-id"
     resume_state = ResumeState(
         primary=str(tmp_path.resolve()),
         agent_kind="cursor",
         plan_model="saved-plan",
         agent_model="saved-exec",
         wt_path=str(wt.resolve()),
+        task_id=task_job_id,
     )
     cycles: list[bool] = []
 
@@ -262,8 +354,8 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
     monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
         cli,
-        "resolve_runner_for_worktree",
-        lambda _primary, _wt: ("gen-orphan", resume_state),
+        "resolve_runner_for_task_id",
+        lambda _primary, tid: ("gen-orphan", resume_state) if tid == task_job_id else None,
     )
     monkeypatch.setattr(
         cli,
@@ -289,8 +381,8 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
         cli.app,
         [
             "agent",
-            "--complete-worktree",
-            str(wt),
+            "--resume-task",
+            task_job_id,
             "--skip-preflight",
             "--agent",
             "cursor",
@@ -301,7 +393,7 @@ def test_auto_focus_complete_worktree_runs_single_resume_cycle(monkeypatch, tmp_
     assert cycles == [True]
 
 
-def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
+def test_auto_focus_resume_task_ignores_saved_cycle_count_for_one_attempt(
     monkeypatch, tmp_path: Path
 ) -> None:
     from ralph_focus import cli
@@ -323,6 +415,7 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
 
     wt = tmp_path / ".sponte" / "worktrees" / "orphan"
     wt.mkdir(parents=True)
+    task_job_id = "orphan-task-id"
     resume_state = ResumeState(
         primary=str(tmp_path.resolve()),
         agent_kind="cursor",
@@ -330,6 +423,7 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
         agent_model="saved-exec",
         wt_path=str(wt.resolve()),
         cycles_done=7,
+        task_id=task_job_id,
     )
     seen: list[bool] = []
 
@@ -337,8 +431,8 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
     monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
         cli,
-        "resolve_runner_for_worktree",
-        lambda _primary, _wt: ("gen-orphan", resume_state),
+        "resolve_runner_for_task_id",
+        lambda _primary, tid: ("gen-orphan", resume_state) if tid == task_job_id else None,
     )
     monkeypatch.setattr(
         cli,
@@ -364,8 +458,8 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
         cli.app,
         [
             "agent",
-            "--complete-worktree",
-            str(wt),
+            "--resume-task",
+            task_job_id,
             "--skip-preflight",
             "--agent",
             "cursor",
@@ -376,7 +470,7 @@ def test_auto_focus_complete_worktree_ignores_saved_cycle_count_for_one_attempt(
     assert seen == [True]
 
 
-def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch, tmp_path: Path) -> None:
+def test_auto_focus_resume_task_ignores_expired_saved_deadline(monkeypatch, tmp_path: Path) -> None:
     from ralph_focus import cli
     from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
 
@@ -396,6 +490,7 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
 
     wt = tmp_path / ".sponte" / "worktrees" / "orphan"
     wt.mkdir(parents=True)
+    task_job_id = "orphan-task-id"
     resume_state = ResumeState(
         primary=str(tmp_path.resolve()),
         agent_kind="cursor",
@@ -403,6 +498,7 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
         agent_model="saved-exec",
         wt_path=str(wt.resolve()),
         session_deadline_epoch="1",
+        task_id=task_job_id,
     )
     seen: list[bool] = []
 
@@ -410,8 +506,8 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
     monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(
         cli,
-        "resolve_runner_for_worktree",
-        lambda _primary, _wt: ("gen-orphan", resume_state),
+        "resolve_runner_for_task_id",
+        lambda _primary, tid: ("gen-orphan", resume_state) if tid == task_job_id else None,
     )
     monkeypatch.setattr(
         cli,
@@ -437,8 +533,8 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
         cli.app,
         [
             "agent",
-            "--complete-worktree",
-            str(wt),
+            "--resume-task",
+            task_job_id,
             "--skip-preflight",
             "--agent",
             "cursor",
@@ -449,7 +545,7 @@ def test_auto_focus_complete_worktree_ignores_expired_saved_deadline(monkeypatch
     assert seen == [True]
 
 
-def test_auto_focus_complete_worktree_rejects_combine_resume(monkeypatch, tmp_path: Path) -> None:
+def test_auto_focus_resume_task_rejects_combine_resume_session(monkeypatch, tmp_path: Path) -> None:
     from ralph_focus import cli
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
@@ -458,9 +554,9 @@ def test_auto_focus_complete_worktree_rejects_combine_resume(monkeypatch, tmp_pa
         cli.app,
         [
             "agent",
-            "--complete-worktree",
-            str(tmp_path / "wt"),
-            "--resume",
+            "--resume-task",
+            "tid-1",
+            "--resume-session",
             "x",
         ],
     )
@@ -477,7 +573,9 @@ def test_task_resume_command_prepares_new_session_and_invokes_agent(monkeypatch,
     monkeypatch.setattr(
         cli,
         "_invoke_agent_minimal",
-        lambda *, workspace, resume: seen.update({"workspace": workspace, "resume": resume}),
+        lambda *, workspace, resume_session: seen.update(
+            {"workspace": workspace, "resume_session": resume_session}
+        ),
     )
 
     runner = CliRunner()
@@ -485,7 +583,7 @@ def test_task_resume_command_prepares_new_session_and_invokes_agent(monkeypatch,
 
     assert result.exit_code == 0
     assert "rap-new1234" in _output(result)
-    assert seen == {"workspace": None, "resume": "rap-new1234"}
+    assert seen == {"workspace": None, "resume_session": "rap-new1234"}
 
 
 def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: Path) -> None:
@@ -598,4 +696,7 @@ def test_agent_help_uses_session_language_for_resume_option() -> None:
 
     assert result.exit_code == 0
     assert "SESSION_ID" in result.stdout
-    assert "session-resume" in result.stdout
+    assert "TASK_ID" in result.stdout
+    assert "--resume-session" in result.stdout
+    assert "--resume-task" in result.stdout
+    assert "--task" in result.stdout

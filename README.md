@@ -91,7 +91,7 @@ sponte config show --workspace /absolute/path/to/workspace
 sponte agent --workspace /absolute/path/to/workspace --trunk-branch main
 
 # Start an agent cycle for one explicit task
-sponte agent --workspace /absolute/path/to/workspace .sponte/tasks/backlog/example-task.md
+sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/backlog/example-task.md
 
 # Resume the same session (lane)
 sponte session-resume rap-abcd1234 --workspace /absolute/path/to/workspace
@@ -106,7 +106,7 @@ sponte task-current --workspace /absolute/path/to/workspace
 sponte session-current --workspace /absolute/path/to/workspace
 
 # Recover one orphaned worktree and exit
-sponte agent --workspace /absolute/path/to/workspace --complete-worktree "/absolute/path/to/workspace/.sponte/worktrees/wt-…"
+sponte agent --workspace /absolute/path/to/workspace --resume-task "<task_id from status or jobs>"
 
 # Worktree maintenance
 sponte worktree-prune-clean --workspace /absolute/path/to/workspace
@@ -178,7 +178,7 @@ It will:
 
 ## Recovery Flow
 
-`sponte agent --complete-worktree <path>` uses saved Sponte runtime state to recover an orphaned worktree, resume exactly one cycle for that worktree, and then exit.
+`sponte agent --resume-task <task_id>` uses saved Sponte runtime state for that task id, runs exactly one cycle (orphan worktree recovery), and then exits.
 
 ## Positioning
 

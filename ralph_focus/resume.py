@@ -47,7 +47,7 @@ class ResumeState:
     total_tokens: int = 0
     no_progress_loops: int = 0
     token_warning_emitted: str = "false"
-    # Generation id for CLI --resume / locks; may differ from runners/<segment>/ when segment is hashed.
+    # Generation id for CLI --resume-session / locks; may differ from runners/<segment>/ when segment is hashed.
     resume_runner_id: str = ""
     task_id: str = ""
 
@@ -247,6 +247,21 @@ def resolve_runner_for_worktree(primary: Path, worktree: Path) -> tuple[str, Res
                 matches.append((rid, st))
         except OSError:
             continue
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def resolve_runner_for_task_id(primary: Path, task_id: str) -> tuple[str, ResumeState] | None:
+    """Map a persisted ``task_id`` to the session runner id and resume state; ``None`` if unknown or ambiguous."""
+    want = task_id.strip()
+    if not want:
+        return None
+    matches: list[tuple[str, ResumeState]] = []
+    for rid, st in list_recoverable_resumes(primary):
+        tid = (st.task_id or "").strip()
+        if tid == want:
+            matches.append((rid, st))
     if len(matches) == 1:
         return matches[0]
     return None
