@@ -1087,10 +1087,17 @@ def cmd_agent(
         if cfg.current_wt_path and cfg.current_wt_path.is_dir() and not cleanup_on_exit:
             resume_ok, _ = load_resume_detailed(primary, runner_id=runner_id_effective)
             if resume_ok is not None:
+                tid = (resume_ok.task_id or "").strip()
+                task_resume_hint = (
+                    f"sponte task-resume {shlex.quote(tid)}"
+                    if tid
+                    else "sponte task-resume <task_id>"
+                )
                 console.print(
                     f"[yellow]Worktree left for inspection:[/yellow] {cfg.current_wt_path}\n"
-                    f"Resume with: sponte session-resume "
-                    f"{shlex.quote(runner_id_effective)}"
+                    f"Resume session with: sponte session-resume "
+                    f"{shlex.quote(runner_id_effective)}\n"
+                    f"Resume task with: {task_resume_hint}"
                 )
             else:
                 console.print(

@@ -827,6 +827,75 @@ def test_auto_focus_prints_non_resume_hint_when_resume_missing(monkeypatch, tmp_
     assert "sponte session-resume rap-test1234" not in _output(result)
 
 
+def test_auto_focus_prints_session_and_task_resume_hints_when_worktree_left(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from ralph_focus import cli
+    from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
+
+    class _Harness:
+        id = "cursor"
+        display_name = "Cursor"
+        capabilities = HarnessCapabilities()
+
+        def availability(self) -> AvailabilityReport:
+            return AvailabilityReport(available=True)
+
+        def prepare(self, request: RunRequest) -> RunRequest:
+            return request
+
+        def run(self, request: RunRequest) -> RunResult:
+            return RunResult(exit_code=0, usage={})
+
+    def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
+        cfg.current_wt_path = tmp_path / ".sponte" / "worktrees" / "example"
+        cfg.current_wt_path.mkdir(parents=True, exist_ok=True)
+        return 0
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
+    monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda *_a, **_k: (
+            ResumeState(primary=str(tmp_path.resolve()), task_id="t-abc123"),
+            None,
+        ),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "agent",
+            "--once",
+            "--skip-preflight",
+            "--task",
+            str(tmp_path / TASKS_DIR / "backlog" / "example.md"),
+            "--agent",
+            "cursor",
+        ],
+    )
+
+    assert result.exit_code == 0
+    out = _output(result)
+    assert "Worktree left for inspection" in out
+    assert "Resume session with:" in out
+    assert "sponte session-resume rap-test1234" in out
+    assert "Resume task with:" in out
+    assert "sponte task-resume" in out
+    assert "t-abc123" in out
+
+
 def test_auto_focus_resume_task_rejects_combine_resume_session(monkeypatch, tmp_path: Path) -> None:
     from ralph_focus import cli
 
