@@ -51,6 +51,7 @@ from ralph_focus.guardrails.paths import PathGuardError, validate_task_path_argu
 from ralph_focus.resume import ResumeState, clear_resume as resume_clear_state
 from ralph_focus.resume import (
     load_resume,
+    load_resume_detailed,
     resolve_runner_for_task_id,
     resume_path,
 )
@@ -64,7 +65,7 @@ from ralph_focus.workspace_resolve import (
     resolve_primary_workspace,
 )
 from ralph_focus.workspace_command_detection import resolved_default_test_command
-from ralph_focus.workspace_init import refresh_priorities_from_backlog, refresh_workspace_commands
+from ralph_focus.workspace_init import refresh_workspace_commands
 from ralph_focus.task_jobs import (
     read_session_job_status,
     read_task_job_status,
@@ -81,10 +82,10 @@ from ralph_focus.task_lifecycle import (
     task_cleanup,
 )
 from ralph_focus.tasks import (
-    compute_task_id,
     count_checklist,
     priority_task_paths_pending,
     priorities_file,
+    task_id_from_resolved_path,
     task_label,
     task_root,
 )
@@ -467,7 +468,6 @@ def _plan_tasks_interactively(primary: Path) -> list[Path]:
         console.print(f"[green]{verb} task:[/green] {task_path.relative_to(primary)}")
         if not Confirm.ask("Add another task?", default=False):
             break
-    refresh_priorities_from_backlog(primary)
     return created
 
 
@@ -703,9 +703,10 @@ def cmd_agent(
             )
             raise typer.Exit(1)
         resume_session_id, _ = pair
-        loaded_resume_state = load_resume(primary, runner_id=resume_session_id)
+        loaded_resume_state, rreason = load_resume_detailed(primary, runner_id=resume_session_id)
         if loaded_resume_state is None:
-            console.print("[red]Could not load resume state for the resolved session.[/red]")
+            detail = f" ({rreason.value})" if rreason is not None else ""
+            console.print(f"[red]Could not load resume state for the resolved session.[/red]{detail}")
             raise typer.Exit(1)
         resume_id = resume_session_id
 
@@ -716,12 +717,13 @@ def cmd_agent(
         raise typer.Exit(1)
 
     if resume_id is not None and not resume_task_arg:
-        loaded_resume_state = load_resume(
+        loaded_resume_state, rreason = load_resume_detailed(
             primary,
             runner_id=runner_id_effective,
         )
         if loaded_resume_state is None:
-            console.print("[red]Nothing to resume[/red]")
+            detail = f" ({rreason.value})" if rreason is not None else ""
+            console.print(f"[red]Nothing to resume[/red]{detail}")
             raise typer.Exit(1)
 
     task_arg_normalized = ""
@@ -1069,11 +1071,20 @@ def cmd_agent(
     finally:
         finalize_ralph_lock_if_session_idle(primary, runner_id_effective)
         if cfg.current_wt_path and cfg.current_wt_path.is_dir() and not cleanup_on_exit:
-            console.print(
-                f"[yellow]Worktree left for inspection:[/yellow] {cfg.current_wt_path}\n"
-                f"Resume with: sponte session-resume "
-                f"{shlex.quote(runner_id_effective)}"
-            )
+            resume_ok, _ = load_resume_detailed(primary, runner_id=runner_id_effective)
+            if resume_ok is not None:
+                console.print(
+                    f"[yellow]Worktree left for inspection:[/yellow] {cfg.current_wt_path}\n"
+                    f"Resume with: sponte session-resume "
+                    f"{shlex.quote(runner_id_effective)}"
+                )
+            else:
+                console.print(
+                    f"[yellow]Worktree left for inspection:[/yellow] {cfg.current_wt_path}\n"
+                    "[dim]Session resume file is missing or invalid (run may have exited before first "
+                    "persist). Use `sponte task-current` / `sponte task-resume <task_id>` if a task "
+                    "was claimed.[/dim]"
+                )
 
     _print_session_summary(
         stats,
@@ -1288,7 +1299,7 @@ def cmd_session_show(
     _print_session_job_detail(session_id, st)
 
 
-@app.command("task-list", help="List backlog task files under .sponte/tasks/backlog/.")
+@app.command("task-list", help="List markdown task files under .sponte/tasks/ (excludes _tmp, artifacts).")
 def cmd_task_list(
     workspace: Annotated[
         Path | None,
@@ -1312,7 +1323,7 @@ def cmd_task_priority(
     pri = priorities_file(primary)
     console.print(f"[dim]{pri.relative_to(primary)}[/dim]")
     for p in priority_task_paths_pending(pri, primary):
-        tid = compute_task_id(task_stem=p.stem, task_title=task_label(p))
+        tid = task_id_from_resolved_path(p)
         console.print(f"  {p.relative_to(primary).as_posix()}  [cyan]{tid}[/cyan]")
 
 
