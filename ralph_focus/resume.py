@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 
 from config.defaults import LEGACY_RALPH_DATA_DIR, RESUME_SCHEMA_VERSION
@@ -19,6 +20,17 @@ from ralph_focus.paths import (
     resume_file_legacy,
 )
 from ralph_focus.tasks import normalize_task_rel
+
+
+class ResumeLoadFailureReason(str, Enum):
+    """Why :func:`load_resume` would return ``None`` for this workspace + runner id."""
+
+    missing_file = "missing_file"
+    invalid_schema = "invalid_schema"
+    invalid_version = "invalid_version"
+    primary_mismatch = "primary_mismatch"
+    empty_required_fields = "empty_required_fields"
+    invalid_numeric_fields = "invalid_numeric_fields"
 
 
 @dataclass
@@ -140,11 +152,25 @@ def load_resume(
     *,
     runner_id: str = "default",
 ) -> ResumeState | None:
+    st, _reason = load_resume_detailed(primary, runner_id=runner_id)
+    return st
+
+
+def load_resume_detailed(
+    primary: Path,
+    *,
+    runner_id: str = "default",
+) -> tuple[ResumeState | None, ResumeLoadFailureReason | None]:
+    """
+    Like :func:`load_resume` but returns a failure reason when state is unusable.
+
+    ``(state, None)`` on success; ``(None, reason)`` on failure; ``(None, None)`` should not occur.
+    """
     path = resume_file(primary, runner_id=runner_id)
     if not path.is_file():
         leg = resume_file_legacy(primary, runner_id=runner_id)
         if not leg.is_file():
-            return None
+            return None, ResumeLoadFailureReason.missing_file
         path = leg
     raw: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -153,13 +179,13 @@ def load_resume(
             raw[p[0]] = p[1]
     ver = _parse_int(raw, "R_RESUME_SCHEMA_VERSION", 0)
     if ver is None:
-        return None
+        return None, ResumeLoadFailureReason.invalid_schema
     if ver not in (1, 2, 3):
-        return None
+        return None, ResumeLoadFailureReason.invalid_version
     if raw.get("R_RESUME_PRIMARY", "") != str(primary.resolve()):
-        return None
+        return None, ResumeLoadFailureReason.primary_mismatch
     if not raw.get("R_RESUME_WT_PATH") or not raw.get("R_RESUME_REL_TASK") or not raw.get("R_RESUME_LOGF"):
-        return None
+        return None, ResumeLoadFailureReason.empty_required_fields
     rel_task = normalize_task_rel(raw.get("R_RESUME_REL_TASK", ""))
     plan_rel = raw.get("R_RESUME_PLAN_REL", "")
     if plan_rel.startswith(".ralph/data/"):
@@ -185,34 +211,37 @@ def load_resume(
         no_progress_loops,
     )
     if any(value is None for value in numeric_values):
-        return None
-    return ResumeState(
-        schema_version=ver,
-        primary=raw.get("R_RESUME_PRIMARY", ""),
-        phase=raw.get("R_RESUME_PHASE", "PLAN"),
-        logf=raw.get("R_RESUME_LOGF", ""),
-        wt_path=raw.get("R_RESUME_WT_PATH", ""),
-        branch=raw.get("R_RESUME_BRANCH", ""),
-        main_ref=raw.get("R_RESUME_MAIN_REF", ""),
-        rel_task=rel_task,
-        plan_rel=plan_rel,
-        implement_next=implement_next,
-        improve_i=improve_i,
-        improve_j=improve_j,
-        conflict_next=conflict_next,
-        cycles_done=cycles_done,
-        max_cycles=raw.get("R_RESUME_MAX_CYCLES", ""),
-        task_arg=raw.get("R_RESUME_TASK_ARG", ""),
-        agent_kind=raw.get("R_RESUME_AGENT_KIND", "cursor"),
-        plan_model=raw.get("R_RESUME_PLAN_MODEL", ""),
-        agent_model=raw.get("R_RESUME_AGENT_MODEL", ""),
-        allow_agent_pick=raw.get("R_RESUME_ALLOW_AGENT_PICK", "false"),
-        session_deadline_epoch=raw.get("R_RESUME_SESSION_DEADLINE_EPOCH", ""),
-        total_tokens=total_tokens,
-        no_progress_loops=no_progress_loops,
-        token_warning_emitted=raw.get("R_RESUME_TOKEN_WARNING_EMITTED", "false"),
-        resume_runner_id=raw.get("R_RESUME_RUNNER_ID", ""),
-        task_id=raw.get("R_RESUME_TASK_ID", ""),
+        return None, ResumeLoadFailureReason.invalid_numeric_fields
+    return (
+        ResumeState(
+            schema_version=ver,
+            primary=raw.get("R_RESUME_PRIMARY", ""),
+            phase=raw.get("R_RESUME_PHASE", "PLAN"),
+            logf=raw.get("R_RESUME_LOGF", ""),
+            wt_path=raw.get("R_RESUME_WT_PATH", ""),
+            branch=raw.get("R_RESUME_BRANCH", ""),
+            main_ref=raw.get("R_RESUME_MAIN_REF", ""),
+            rel_task=rel_task,
+            plan_rel=plan_rel,
+            implement_next=implement_next,
+            improve_i=improve_i,
+            improve_j=improve_j,
+            conflict_next=conflict_next,
+            cycles_done=cycles_done,
+            max_cycles=raw.get("R_RESUME_MAX_CYCLES", ""),
+            task_arg=raw.get("R_RESUME_TASK_ARG", ""),
+            agent_kind=raw.get("R_RESUME_AGENT_KIND", "cursor"),
+            plan_model=raw.get("R_RESUME_PLAN_MODEL", ""),
+            agent_model=raw.get("R_RESUME_AGENT_MODEL", ""),
+            allow_agent_pick=raw.get("R_RESUME_ALLOW_AGENT_PICK", "false"),
+            session_deadline_epoch=raw.get("R_RESUME_SESSION_DEADLINE_EPOCH", ""),
+            total_tokens=total_tokens,
+            no_progress_loops=no_progress_loops,
+            token_warning_emitted=raw.get("R_RESUME_TOKEN_WARNING_EMITTED", "false"),
+            resume_runner_id=raw.get("R_RESUME_RUNNER_ID", ""),
+            task_id=raw.get("R_RESUME_TASK_ID", ""),
+        ),
+        None,
     )
 
 
