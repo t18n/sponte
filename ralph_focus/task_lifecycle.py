@@ -29,6 +29,7 @@ from ralph_focus.task_jobs import (
     write_task_job_status,
 )
 from ralph_focus.tasks import concrete_task_rel, task_stage, task_with_stage
+from ralph_focus.tasks_lock_registry import tasks_lock_remove
 from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.workspace_settings import load_workspace_settings
 from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
@@ -43,6 +44,8 @@ def _unlink_quiet(p: Path) -> None:
 
 def _restore_task_to_backlog(repo: Path, rel_task: str) -> str:
     rel = concrete_task_rel(repo, rel_task)
+    if task_stage(rel) is None:
+        return rel
     if task_stage(rel) != "in-progress":
         return rel
     src = repo / rel
@@ -93,6 +96,10 @@ def cancel_task(repo: Path, task_id: str) -> tuple[bool, str]:
 
     new_rel = (st.rel_task or "").strip()
     if new_rel:
+        try:
+            tasks_lock_remove(repo, (repo / new_rel).resolve())
+        except OSError:
+            pass
         new_rel = _restore_task_to_backlog(repo, new_rel)
     if sess:
         _clear_session_active_task(
@@ -399,7 +406,9 @@ def format_claimed_tasks_snapshot(repo: Path) -> str:
 
 
 def list_backlog_tasks(repo: Path) -> list[Path]:
-    return sorted((repo / TASKS_DIR / "backlog").rglob("*.md"))
+    from ralph_focus.tasks import iter_sponte_task_markdown_files
+
+    return iter_sponte_task_markdown_files(repo)
 
 
 __all__ = [
