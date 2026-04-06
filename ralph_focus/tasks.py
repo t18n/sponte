@@ -289,7 +289,7 @@ def pending_backlog_task_paths(repo: Path) -> list[Path]:
 
 
 def format_pending_backlog_for_prompt(repo: Path) -> str:
-    """Markdown bullet list of pending selectable tasks for agent prompts."""
+    """Markdown bullet list of pending selectable tasks under the task store (for ``--auto`` pick)."""
     lines: list[str] = []
     for p in pending_selectable_task_paths(repo):
         rel = p.relative_to(repo).as_posix()

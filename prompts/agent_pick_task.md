@@ -1,4 +1,4 @@
-# Pick the next backlog task (plan phase)
+# Pick the next task (plan phase)
 
 You are choosing **one** task for this Sponte session. Use the **plan model** reasoning: read the repository (code, structure, recent changes if helpful), the task store, and what is already in flight.
 
@@ -8,7 +8,7 @@ You are choosing **one** task for this Sponte session. Use the **plan model** re
 
 __CLAIMED_TASKS__
 
-**Pending backlog candidates** (each path must still exist under `__TASKS_ROOT__/backlog/` and have open checklist items):
+**Pending selectable candidates** (each path must still exist under `__TASKS_ROOT__/` and have open checklist items; paths may be in a `backlog/` subfolder or at the root of the task store):
 
 __BACKLOG_CANDIDATES__
 
@@ -20,7 +20,7 @@ Optional context files (if present): `__GUARDRAILS_FILE__`, `AGENTS.md`, `CLAUDE
 2. **Unblocking:** Prefer work that **unblocks** other backlog items or reduces risk for parallel work.
 3. **Early value:** Among safe choices, prefer tasks that deliver **high value if completed soon**.
 
-If no backlog task is suitable, do not write `__NEXT_TASK_FILE__` (leave it absent or empty).
+If no task from the candidate list is suitable, do not write `__NEXT_TASK_FILE__` (leave it absent or empty).
 
 ## Output
 
@@ -28,5 +28,5 @@ Write **only** the single repo-relative path of the chosen task (one line, no ma
 
 The path must:
 - exist on disk,
-- be under `__TASKS_ROOT__/backlog/`,
+- stay under `__TASKS_ROOT__/` (repo-relative),
 - correspond to a task file that still has **pending** checklist items.

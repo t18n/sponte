@@ -25,7 +25,7 @@ def test_render_prompt_injects_next_task_file_for_agent_pick(tmp_path: Path, mon
 
     rendered = render_prompt("agent_pick_task", primary=tmp_path, task_rel="", plan_rel="")
 
-    assert f"{TASKS_DIR}/backlog/" in rendered
+    assert TASKS_DIR in rendered
     assert str(next_task_file(tmp_path)) in rendered
     assert ".agents/" not in rendered
     assert "__BACKLOG_CANDIDATES__" not in rendered
@@ -42,7 +42,7 @@ def test_render_prompt_uses_legacy_task_root_when_repo_still_uses_legacy_layout(
 
     rendered = render_prompt("agent_pick_task", primary=tmp_path, task_rel="", plan_rel="")
 
-    assert f"{LEGACY_TASKS_DIR}/backlog/" in rendered
+    assert LEGACY_TASKS_DIR in rendered
 
 
 def test_rendered_active_prompts_mention_workspace_instruction_files(tmp_path: Path) -> None:

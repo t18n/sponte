@@ -1665,19 +1665,42 @@ def _agent_pick_backlog_task(cfg: AutoFocusConfig) -> Path | None:
     )
     _append_phase_log(logf, "AGENT_PICK_TASK")
     if cfg._run_agent(primary, cfg.plan_model, body, logf, "AGENT_PICK_TASK") != 0:
+        _maybe_print_auto_pick_failure_help(
+            cfg,
+            "Plan-model pick failed (non-zero exit); see agent-pick.log in session logs.",
+        )
         return None
-    if cfg.progress != "off":
-        _print_selectable_tasks_table(cfg)
     if not nf.is_file():
+        _maybe_print_auto_pick_failure_help(
+            cfg,
+            "Plan model did not write the next-task path file.",
+        )
         return None
     line = nf.read_text(encoding="utf-8", errors="replace").splitlines()[0].strip()
     line = concrete_task_rel(primary, line)
     abs_p = normalize_task_path(primary, line)
     if not abs_p.is_file() or not task_has_pending(abs_p):
+        _maybe_print_auto_pick_failure_help(
+            cfg,
+            "Next-task path is missing, not a task file, or has no pending checklist items.",
+        )
         return None
     if path_is_tasks_locked(primary, abs_p):
+        _maybe_print_auto_pick_failure_help(
+            cfg,
+            "Chosen task is path-locked (another session may hold it).",
+        )
         return None
     return abs_p
+
+
+def _maybe_print_auto_pick_failure_help(cfg: AutoFocusConfig, message: str) -> None:
+    if cfg.progress == "off":
+        return
+    from rich.console import Console
+
+    Console(stderr=True).print(f"[yellow]{message}[/yellow]")
+    _print_selectable_tasks_table(cfg)
 
 
 def _print_selectable_tasks_table(cfg: AutoFocusConfig) -> None:

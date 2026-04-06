@@ -107,14 +107,21 @@ def test_select_next_task_abs_uses_plan_model_not_priorities(
         nf.write_text(f"{TASKS_DIR}/backlog/beta.md\n", encoding="utf-8")
         return 0
 
+    table_calls: list[object] = []
+
+    def _no_table(c: cycle.AutoFocusConfig) -> None:
+        table_calls.append(c)
+
     monkeypatch.setattr(cfg, "_run_agent", fake_run_agent)
     monkeypatch.setattr(cycle, "_append_phase_log", lambda *_a, **_k: None)
+    monkeypatch.setattr(cycle, "_print_selectable_tasks_table", _no_table)
 
     code, picked = cycle._select_next_task_abs(cfg)
 
     assert code == 0
     assert picked == repo / TASKS_DIR / "backlog" / "beta.md"
     assert models_seen == ["plan-model-x"]
+    assert table_calls == []
 
 
 def test_select_next_task_abs_no_agent_pick_returns_no_actionable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
