@@ -11,6 +11,7 @@ from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
 
 _LEGACY_TASKS_PREFIX = ".tasks/"
 _TASK_STAGES = ("backlog", "in-progress", "review-required", "completed")
+_TASK_PATH_SKIP_PARTS = frozenset({"_tmp", "artifacts"})
 
 _PENDING = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[[\s]\]", re.MULTILINE)
 _DONE = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[x\]", re.MULTILINE)
@@ -216,9 +217,7 @@ def task_title_hash_suffix(title: str, *, length: int = 6) -> str:
 
 def compute_task_id(*, task_stem: str, task_title: str) -> str:
     """
-    ``task_id = <slugified-task-name>-<6charhash(title)>``.
-
-    Changing the task title changes the id; the slug comes from the title when present.
+    Legacy title-derived id (tests / migration). Prefer :func:`task_id_from_resolved_path`.
     """
     stem = Path(task_stem).stem if task_stem.strip() else "task"
     slug_source = task_title.strip() or stem
@@ -226,20 +225,75 @@ def compute_task_id(*, task_stem: str, task_title: str) -> str:
     return f"{slug}-{task_title_hash_suffix(task_title)}"
 
 
-def pending_backlog_task_paths(repo: Path) -> list[Path]:
-    """Backlog markdown tasks under the active task root that still have pending checklist items."""
-    backlog = repo / task_root(repo) / "backlog"
-    if not backlog.is_dir():
+def task_id_from_resolved_path(task_abs: Path) -> str:
+    """Stable ``task_id`` from the resolved absolute path (``t-`` + 16 hex chars)."""
+    try:
+        key = task_abs.expanduser().resolve().as_posix()
+    except OSError:
+        key = str(task_abs)
+    return f"t-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}"
+
+
+def normalize_task_body_for_naming_hash(text: str) -> str:
+    """Minimal normalization before hashing display-name refresh triggers."""
+    s = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    while "\n\n\n" in s:
+        s = s.replace("\n\n\n", "\n\n")
+    return s
+
+
+def naming_content_hash(text: str) -> str:
+    return hashlib.sha256(normalize_task_body_for_naming_hash(text).encode("utf-8")).hexdigest()[:24]
+
+
+def iter_sponte_task_markdown_files(repo: Path) -> list[Path]:
+    """All ``*.md`` under ``.sponte/tasks/``, excluding ``_tmp`` and ``artifacts`` subtrees."""
+    root = repo / TASKS_DIR
+    if not root.is_dir():
         return []
-    return sorted(p for p in backlog.rglob("*.md") if p.is_file() and task_has_pending(p))
+    out: list[Path] = []
+    for p in sorted(root.rglob("*.md")):
+        if not p.is_file():
+            continue
+        try:
+            rel_parts = p.relative_to(root).parts
+        except ValueError:
+            continue
+        if _TASK_PATH_SKIP_PARTS.intersection(rel_parts):
+            continue
+        out.append(p)
+    return out
+
+
+def pending_selectable_task_paths(repo: Path) -> list[Path]:
+    """Markdown tasks that are eligible for auto/claim selection (pending checklist, not path-locked)."""
+    from ralph_focus.tasks_lock_registry import read_tasks_lock_paths
+
+    locked = read_tasks_lock_paths(repo)
+    out: list[Path] = []
+    for p in iter_sponte_task_markdown_files(repo):
+        if not task_has_pending(p):
+            continue
+        try:
+            if p.resolve() in locked:
+                continue
+        except OSError:
+            continue
+        out.append(p)
+    return out
+
+
+def pending_backlog_task_paths(repo: Path) -> list[Path]:
+    """Pending tasks anywhere under ``.sponte/tasks/`` (excluding reserved subtrees)."""
+    return pending_selectable_task_paths(repo)
 
 
 def format_pending_backlog_for_prompt(repo: Path) -> str:
-    """Markdown bullet list of pending backlog tasks for agent prompts."""
+    """Markdown bullet list of pending selectable tasks for agent prompts."""
     lines: list[str] = []
-    for p in pending_backlog_task_paths(repo):
+    for p in pending_selectable_task_paths(repo):
         rel = p.relative_to(repo).as_posix()
         lines.append(f"- `{rel}` — {task_label(p)}")
     if not lines:
-        return "_(No pending tasks in backlog.)_"
+        return "_(No pending selectable tasks.)_"
     return "\n".join(lines)
