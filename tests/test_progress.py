@@ -22,4 +22,24 @@ def test_phase_bar_line_marks_estimated_live_tokens() -> None:
 
 
 def test_max_agent_steps_matches_phase_sequence_without_followup_or_priorities() -> None:
-    assert max_agent_steps(implement_max=15, improve_implement_max=5, conflict_max=5) == 41
+    # PLAN + IMPLEMENT + holistic(2 steps per pass) + WRAP + VERIFY + conflicts; no consistency block.
+    assert (
+        max_agent_steps(
+            15,
+            3,
+            5,
+            consistency_enabled=False,
+            consistency_implement_max=1,
+        )
+        == 29
+    )
+    assert (
+        max_agent_steps(
+            15,
+            1,
+            5,
+            consistency_enabled=True,
+            consistency_implement_max=1,
+        )
+        == 27
+    )

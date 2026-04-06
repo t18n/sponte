@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-PLANNER_PHASES = frozenset({"PLAN", "IMPROVE", "IMPROVE_REVIEW", "VERIFY"})
+PLANNER_PHASES = frozenset({"PLAN", "IMPROVE", "IMPROVE_REVIEW", "CONSISTENCY_REVIEW", "VERIFY"})
 EXECUTOR_PHASES = frozenset(
     {
         "IMPLEMENT",
         "IMPROVE_EXECUTE",
+        "CONSISTENCY_EXECUTE",
         "WRAP",
         "MERGE_CONFLICT",
         "PRIMARY_PREMERGE",

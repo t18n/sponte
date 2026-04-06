@@ -24,11 +24,12 @@ from config.commands import (
 from config.defaults import (
     AGENT_PICK_LOCK_TIMEOUT_SEC,
     CONFLICT_ROUNDS_MAX,
+    CONSISTENCY_IMPLEMENT_MAX,
     MERGE_LOCK_TIMEOUT_SEC,
     GIT_IDENTITY_EMAIL,
     GIT_IDENTITY_NAME,
+    HOLISTIC_REVIEW_PASSES,
     IMPLEMENT_ROUNDS_MAX,
-    IMPROVE_IMPLEMENT_MAX,
     NO_PROGRESS_LOOPS_MAX,
     RESUME_SCHEMA_VERSION,
     ROTATE_THRESHOLD_TOKENS,
@@ -131,6 +132,8 @@ ProgressMode = Literal["off", "on", "full"]
 _COUNTED_AGENT_PHASES = frozenset({
     "PLAN",
     "IMPLEMENT",
+    "CONSISTENCY_REVIEW",
+    "CONSISTENCY_EXECUTE",
     "IMPROVE_REVIEW",
     "IMPROVE_EXECUTE",
     "WRAP",
@@ -149,6 +152,7 @@ class _PhaseBudgetCtx:
     implement_next: int
     improve_i: int
     improve_j: int
+    consistency_j: int
     conflict_next: int
 
 
@@ -267,7 +271,9 @@ class AutoFocusConfig:
     execute_model: str
     progress: ProgressMode = "off"
     implement_rounds_max: int = IMPLEMENT_ROUNDS_MAX
-    improve_implement_max: int = IMPROVE_IMPLEMENT_MAX
+    holistic_review_passes: int = HOLISTIC_REVIEW_PASSES
+    consistency_check_enabled: bool = True
+    consistency_implement_max: int = CONSISTENCY_IMPLEMENT_MAX
     conflict_rounds_max: int = CONFLICT_ROUNDS_MAX
     allow_agent_pick: bool = False
     cleanup_on_exit: bool = False
@@ -302,6 +308,15 @@ class AutoFocusConfig:
     merge_required: bool = True
     phase_agent_rounds: int = 0
 
+    def max_progress_steps(self) -> int:
+        return max_agent_steps(
+            self.implement_rounds_max,
+            self.holistic_review_passes,
+            self.conflict_rounds_max,
+            consistency_enabled=self.consistency_check_enabled,
+            consistency_implement_max=self.consistency_implement_max,
+        )
+
     def _run_agent(
         self,
         wt: Path,
@@ -329,11 +344,7 @@ class AutoFocusConfig:
             if self.progress != "off":
                 phase_bar(
                     self.progress_agent_step,
-                    max_agent_steps(
-                        self.implement_rounds_max,
-                        self.improve_implement_max,
-                        self.conflict_rounds_max,
-                    ),
+                    self.max_progress_steps(),
                     label,
                     model=model,
                     token_total=self.stats.rotation_tokens() + _usage_rotation_tokens(live_usage),
@@ -365,11 +376,7 @@ class AutoFocusConfig:
             self.progress_agent_step += 1
             phase_bar(
                 self.progress_agent_step,
-                max_agent_steps(
-                    self.implement_rounds_max,
-                    self.improve_implement_max,
-                    self.conflict_rounds_max,
-                ),
+                self.max_progress_steps(),
                 label,
                 model=model,
                 token_total=self.stats.rotation_tokens(),
@@ -695,7 +702,7 @@ def _run_phase_agent(
         or before.head != after.head
         or before.worktree_fingerprint != after.worktree_fingerprint
     )
-    if phase in ("IMPLEMENT", "IMPROVE_EXECUTE"):
+    if phase in ("IMPLEMENT", "IMPROVE_EXECUTE", "CONSISTENCY_EXECUTE"):
         if made_progress:
             cfg.no_progress_loops = 0
         else:
@@ -897,6 +904,7 @@ def run_one_cycle(
     implement_next = 1
     improve_i = 1
     improve_j = 0
+    consistency_j = 0
     conflict_next = 1
 
     cfg.progress_agent_step = 0
@@ -941,6 +949,7 @@ def run_one_cycle(
         implement_next = st.implement_next
         improve_i = st.improve_i
         improve_j = st.improve_j
+        consistency_j = st.consistency_j
         conflict_next = st.conflict_next
         cfg.plan_model = st.plan_model or cfg.plan_model
         cfg.execute_model = st.agent_model or cfg.execute_model
@@ -1049,6 +1058,7 @@ def run_one_cycle(
         implement_next = 1
         improve_i = 1
         improve_j = 0
+        consistency_j = 0
         conflict_next = 1
         cfg.no_progress_loops = 0
         cfg.token_warning_emitted = False
@@ -1064,6 +1074,7 @@ def run_one_cycle(
             implement_next,
             improve_i,
             improve_j,
+            consistency_j,
             conflict_next,
         )
         emit_lifecycle_event(
@@ -1095,6 +1106,7 @@ def run_one_cycle(
             implement_next,
             improve_i,
             improve_j,
+            consistency_j,
             conflict_next,
         )
 
@@ -1130,7 +1142,7 @@ def run_one_cycle(
             _register_plan_file_artifact(cfg, plan_rel)
         phase = "IMPLEMENT"
         implement_next = 1
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
         if rc == 3:
             return 3
 
@@ -1142,7 +1154,7 @@ def run_one_cycle(
         ):
             n += 1
             implement_next = n
-            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
             _append_phase_log(logf, f"IMPLEMENT_{n}")
             rc = _run_phase_agent(
                 cfg,
@@ -1160,22 +1172,79 @@ def run_one_cycle(
             if rc == 1:
                 return rc
             implement_next = n + 1
-            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
             if rc == 3:
                 return 3
         if not _task_is_complete(cfg.primary, cfg.task_id, normalize_task_path(primary, rel_task)):
             return 1
+        if cfg.consistency_check_enabled:
+            phase = "CONSISTENCY_REVIEW"
+            consistency_j = 0
+        else:
+            phase = "IMPROVE_REVIEW"
+            improve_i = 1
+            improve_j = 0
+            consistency_j = 0
+        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
+
+    # CONSISTENCY (repo-wide fit before holistic improve)
+    if phase == "CONSISTENCY_REVIEW":
+        if consistency_j == 0:
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
+            _append_phase_log(logf, "CONSISTENCY_REVIEW")
+            rc = _run_phase_agent(
+                cfg,
+                phase="CONSISTENCY_REVIEW",
+                prompt_name="consistency_check",
+                wt_path=wt_path,
+                rel_task=rel_task,
+                plan_rel=plan_rel,
+                logf=logf,
+                label="CONSISTENCY_REVIEW",
+                phase_budget=_pb(),
+            )
+            if rc == 4:
+                return 0
+            if rc == 1:
+                return rc
+            if rc == 3:
+                return 3
+            consistency_j = 1
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
+        while consistency_j <= cfg.consistency_implement_max:
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
+            _append_phase_log(logf, f"CONSISTENCY_EXECUTE_{consistency_j}")
+            rc = _run_phase_agent(
+                cfg,
+                phase="CONSISTENCY_EXECUTE",
+                prompt_name="implement",
+                wt_path=wt_path,
+                rel_task=rel_task,
+                plan_rel=plan_rel,
+                logf=logf,
+                label=f"CONSISTENCY_EXECUTE_{consistency_j}",
+                phase_budget=_pb(),
+            )
+            if rc == 4:
+                return 0
+            if rc == 1:
+                return rc
+            if rc == 3:
+                return 3
+            consistency_j += 1
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
         phase = "IMPROVE_REVIEW"
         improve_i = 1
         improve_j = 0
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+        consistency_j = 0
+        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
 
-    # IMPROVE
+    # IMPROVE (holistic review passes)
     if phase in ("IMPROVE", "IMPROVE_REVIEW"):
         i, j = improve_i, improve_j
-        while i <= 3:
+        while i <= cfg.holistic_review_passes:
             if j == 0:
-                _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, 0, conflict_next)
+                _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, 0, consistency_j, conflict_next)
                 _append_phase_log(logf, f"IMPROVE_{i}")
                 rc = _run_phase_agent(
                     cfg,
@@ -1192,39 +1261,36 @@ def run_one_cycle(
                     return 0
                 if rc == 1:
                     return rc
+                if rc == 3:
+                    return 3
                 j = 1
-                _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, conflict_next)
-                if rc == 3:
-                    return 3
-            while j <= cfg.improve_implement_max:
-                _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, conflict_next)
-                _append_phase_log(logf, f"IMPROVE_{i}_IMPLEMENT_{j}")
-                rc = _run_phase_agent(
-                    cfg,
-                    phase="IMPROVE_EXECUTE",
-                    prompt_name="implement",
-                    wt_path=wt_path,
-                    rel_task=rel_task,
-                    plan_rel=plan_rel,
-                    logf=logf,
-                    label=f"IMPROVE_{i}_IMPLEMENT_{j}",
-                    phase_budget=_pb(),
-                )
-                if rc == 4:
-                    return 0
-                if rc == 1:
-                    return rc
-                j += 1
-                _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, conflict_next)
-                if rc == 3:
-                    return 3
-            i += 1
+                _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, consistency_j, conflict_next)
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, consistency_j, conflict_next)
+            _append_phase_log(logf, f"IMPROVE_{i}_IMPLEMENT")
+            rc = _run_phase_agent(
+                cfg,
+                phase="IMPROVE_EXECUTE",
+                prompt_name="implement",
+                wt_path=wt_path,
+                rel_task=rel_task,
+                plan_rel=plan_rel,
+                logf=logf,
+                label=f"IMPROVE_{i}_IMPLEMENT",
+                phase_budget=_pb(),
+            )
+            if rc == 4:
+                return 0
+            if rc == 1:
+                return rc
+            if rc == 3:
+                return 3
             j = 0
-            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, conflict_next)
+            i += 1
+            _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, consistency_j, conflict_next)
         improve_i = i
         improve_j = j
         phase = "WRAP"
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
 
     if phase == "WRAP":
         _append_phase_log(logf, "WRAP_COMMIT")
@@ -1249,7 +1315,7 @@ def run_one_cycle(
         else:
             _append_phase_log(logf, "VERIFY_SKIPPED_POLICY")
             phase = "MERGE"
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
         if rc == 3:
             return 3
 
@@ -1273,7 +1339,7 @@ def run_one_cycle(
         if not _commit_worktree_pending_if_dirty(wt_path, logf, "verify before merge"):
             return 1
         phase = "MERGE"
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
+        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, consistency_j, conflict_next)
         if rc == 3:
             return 3
 
@@ -1337,6 +1403,7 @@ def run_one_cycle(
                             implement_next,
                             improve_i,
                             improve_j,
+                            consistency_j,
                             conflict_next,
                         )
                     elif pre_state.kind != PrimaryPrecheckKind.CLEAN:
@@ -1367,6 +1434,7 @@ def run_one_cycle(
                                 implement_next,
                                 improve_i,
                                 improve_j,
+                                consistency_j,
                                 start_pre_round,
                             )
                             if precheck_rc == 3:
@@ -1391,6 +1459,7 @@ def run_one_cycle(
                                 implement_next,
                                 improve_i,
                                 improve_j,
+                                consistency_j,
                                 conflict_next,
                             )
                             if cfg.progress != "off":
@@ -1447,6 +1516,7 @@ def run_one_cycle(
                             implement_next,
                             improve_i,
                             improve_j,
+                            consistency_j,
                             conflict_next,
                         )
                 else:
@@ -1466,6 +1536,7 @@ def run_one_cycle(
                             implement_next,
                             improve_i,
                             improve_j,
+                            consistency_j,
                             conflict_next,
                         )
 
@@ -1507,6 +1578,7 @@ def run_one_cycle(
                         implement_next,
                         improve_i,
                         improve_j,
+                        consistency_j,
                     )
                     if merge_rc == 3:
                         return 3
@@ -1527,6 +1599,7 @@ def run_one_cycle(
                         implement_next,
                         improve_i,
                         improve_j,
+                        consistency_j,
                     )
                     if merge_rc == 3:
                         return 3
@@ -1615,6 +1688,7 @@ def _persist(
     implement_next: int,
     improve_i: int,
     improve_j: int,
+    consistency_j: int,
     conflict_next: int,
 ) -> None:
     st = ResumeState(
@@ -1630,6 +1704,7 @@ def _persist(
         implement_next=implement_next,
         improve_i=improve_i,
         improve_j=improve_j,
+        consistency_j=consistency_j,
         conflict_next=conflict_next,
         cycles_done=cfg.cycles_done_entry,
         max_cycles=cfg.max_cycles_str,
@@ -1957,6 +2032,7 @@ def _resolve_primary_precheck_conflicts(
     implement_next: int,
     improve_i: int,
     improve_j: int,
+    consistency_j: int,
     start_round: int,
 ) -> int:
     """
@@ -1979,6 +2055,7 @@ def _resolve_primary_precheck_conflicts(
             implement_next,
             improve_i,
             improve_j,
+            consistency_j,
             r,
         )
         _append_phase_log(logf, f"PRIMARY_PREMERGE_RESOLUTION_{r}")
@@ -2050,6 +2127,7 @@ def _resolve_merge_with_agent(
     implement_next: int,
     improve_i: int,
     improve_j: int,
+    consistency_j: int,
 ) -> int:
     r = start_round - 1
     primary = cfg.primary
@@ -2068,6 +2146,7 @@ def _resolve_merge_with_agent(
             implement_next,
             improve_i,
             improve_j,
+            consistency_j,
             r,
         )
         _append_phase_log(logf, f"MERGE_CONFLICT_RESOLUTION_{r}")

@@ -7,7 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from config.defaults import DEFAULT_AGENT, DEFAULT_EXECUTE_MODEL, DEFAULT_PLAN_MODEL, SPONTE_DIR
+from config.defaults import (
+    CONSISTENCY_IMPLEMENT_MAX,
+    DEFAULT_AGENT,
+    DEFAULT_EXECUTE_MODEL,
+    DEFAULT_PLAN_MODEL,
+    HOLISTIC_REVIEW_PASSES,
+    SPONTE_DIR,
+)
 
 SETTINGS_FILENAME = "settings.json"
 DEFAULT_TRUNK_BRANCH = "sponte"
@@ -45,6 +52,9 @@ class WorkspacePolicy:
     max_phase_rounds: int = 20
     verification_required: bool = True
     merge_required: bool = True
+    consistency_check_enabled: bool = True
+    consistency_implement_max: int = CONSISTENCY_IMPLEMENT_MAX
+    holistic_review_passes: int = HOLISTIC_REVIEW_PASSES
 
     @classmethod
     def from_json(cls, raw: object) -> WorkspacePolicy:
@@ -57,10 +67,26 @@ class WorkspacePolicy:
             mpr = 20
         vr = raw.get("verification_required", True)
         mr = raw.get("merge_required", True)
+        cce = raw.get("consistency_check_enabled", True)
+        cim_raw = raw.get("consistency_implement_max", CONSISTENCY_IMPLEMENT_MAX)
+        try:
+            cim = int(cim_raw) if cim_raw is not None else CONSISTENCY_IMPLEMENT_MAX
+        except (TypeError, ValueError):
+            cim = CONSISTENCY_IMPLEMENT_MAX
+        hrp_raw = raw.get("holistic_review_passes", HOLISTIC_REVIEW_PASSES)
+        try:
+            hrp = int(hrp_raw) if hrp_raw is not None else HOLISTIC_REVIEW_PASSES
+        except (TypeError, ValueError):
+            hrp = HOLISTIC_REVIEW_PASSES
         return cls(
             max_phase_rounds=max(1, mpr),
             verification_required=bool(vr) if isinstance(vr, bool) else str(vr).lower() in ("1", "true", "yes"),
             merge_required=bool(mr) if isinstance(mr, bool) else str(mr).lower() in ("1", "true", "yes"),
+            consistency_check_enabled=(
+                bool(cce) if isinstance(cce, bool) else str(cce).lower() in ("1", "true", "yes")
+            ),
+            consistency_implement_max=max(1, cim),
+            holistic_review_passes=max(1, hrp),
         )
 
 
@@ -281,6 +307,9 @@ def save_workspace_settings(root: Path, settings: WorkspaceSettings) -> None:
             "max_phase_rounds": settings.policy.max_phase_rounds,
             "verification_required": settings.policy.verification_required,
             "merge_required": settings.policy.merge_required,
+            "consistency_check_enabled": settings.policy.consistency_check_enabled,
+            "consistency_implement_max": settings.policy.consistency_implement_max,
+            "holistic_review_passes": settings.policy.holistic_review_passes,
         },
     }
     cmd_payload = settings.commands.to_json_dict()

@@ -301,6 +301,7 @@ def test_primary_premerge_returns_error_when_commit_no_edit_fails(monkeypatch: p
         1,
         1,
         0,
+        0,
         1,
     )
 

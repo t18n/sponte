@@ -299,8 +299,10 @@ def _test_tasks_helpers() -> None:
 def _test_phase_policy() -> None:
     assert phase_model_for("PLAN", plan_model="plan", execute_model="exec") == "plan"
     assert phase_model_for("IMPROVE", plan_model="plan", execute_model="exec") == "plan"
+    assert phase_model_for("CONSISTENCY_REVIEW", plan_model="plan", execute_model="exec") == "plan"
     assert phase_model_for("VERIFY", plan_model="plan", execute_model="exec") == "plan"
     assert phase_model_for("IMPLEMENT", plan_model="plan", execute_model="exec") == "exec"
+    assert phase_model_for("CONSISTENCY_EXECUTE", plan_model="plan", execute_model="exec") == "exec"
     assert phase_uses_agent("MERGE") is False
     assert phase_uses_agent("MERGE_CONFLICT") is True
 

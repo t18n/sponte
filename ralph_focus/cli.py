@@ -822,6 +822,9 @@ def cmd_agent(
         max_phase_rounds=ws.policy.max_phase_rounds,
         verification_required=ws.policy.verification_required,
         merge_required=ws.policy.merge_required,
+        holistic_review_passes=ws.policy.holistic_review_passes,
+        consistency_check_enabled=ws.policy.consistency_check_enabled,
+        consistency_implement_max=ws.policy.consistency_implement_max,
         rotate_policy=rotation_policy_from_overrides(
             rotate_threshold=rotate_threshold_tokens,
             warn_threshold=warn_threshold_tokens,
@@ -1526,6 +1529,9 @@ def cmd_config_show(
     t.add_row("policy.max_phase_rounds", str(ws.policy.max_phase_rounds))
     t.add_row("policy.verification_required", str(ws.policy.verification_required))
     t.add_row("policy.merge_required", str(ws.policy.merge_required))
+    t.add_row("policy.consistency_check_enabled", str(ws.policy.consistency_check_enabled))
+    t.add_row("policy.consistency_implement_max", str(ws.policy.consistency_implement_max))
+    t.add_row("policy.holistic_review_passes", str(ws.policy.holistic_review_passes))
     if ws.custom_harness and ws.custom_harness.executable.strip():
         t.add_row("custom_harness.executable", ws.custom_harness.executable)
     cmd = ws.commands

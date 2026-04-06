@@ -47,6 +47,7 @@ class ResumeState:
     implement_next: int = 1
     improve_i: int = 1
     improve_j: int = 0
+    consistency_j: int = 0
     conflict_next: int = 1
     cycles_done: int = 0
     max_cycles: str = ""
@@ -77,6 +78,7 @@ class ResumeState:
             "R_RESUME_IMPLEMENT_NEXT": str(self.implement_next),
             "R_RESUME_IMPROVE_I": str(self.improve_i),
             "R_RESUME_IMPROVE_J": str(self.improve_j),
+            "R_RESUME_CONSISTENCY_J": str(self.consistency_j),
             "R_RESUME_CONFLICT_NEXT": str(self.conflict_next),
             "R_RESUME_CYCLES_DONE": str(self.cycles_done),
             "R_RESUME_MAX_CYCLES": self.max_cycles,
@@ -218,6 +220,7 @@ def load_resume_detailed(
     implement_next = _parse_int(raw, "R_RESUME_IMPLEMENT_NEXT", 1)
     improve_i = _parse_int(raw, "R_RESUME_IMPROVE_I", 1)
     improve_j = _parse_int(raw, "R_RESUME_IMPROVE_J", 0)
+    consistency_j = _parse_int(raw, "R_RESUME_CONSISTENCY_J", 0)
     conflict_next = _parse_int(raw, "R_RESUME_CONFLICT_NEXT", 1)
     cycles_done = _parse_int(raw, "R_RESUME_CYCLES_DONE", 0)
     total_tokens = _parse_int(raw, "R_RESUME_TOTAL_TOKENS", 0)
@@ -226,6 +229,7 @@ def load_resume_detailed(
         implement_next,
         improve_i,
         improve_j,
+        consistency_j,
         conflict_next,
         cycles_done,
         total_tokens,
@@ -247,6 +251,7 @@ def load_resume_detailed(
             implement_next=implement_next,
             improve_i=improve_i,
             improve_j=improve_j,
+            consistency_j=consistency_j,
             conflict_next=conflict_next,
             cycles_done=cycles_done,
             max_cycles=raw.get("R_RESUME_MAX_CYCLES", ""),

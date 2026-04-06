@@ -21,10 +21,17 @@ def get_console(stderr: bool = True) -> Console:
 
 def max_agent_steps(
     implement_max: int,
-    improve_implement_max: int,
+    holistic_passes: int,
     conflict_max: int,
+    *,
+    consistency_enabled: bool,
+    consistency_implement_max: int,
 ) -> int:
-    return 1 + implement_max + 3 + 3 * improve_implement_max + 1 + 1 + conflict_max
+    """Upper bound for phase-bar steps: PLAN + IMPLEMENT + optional consistency + holistic + WRAP + VERIFY + conflicts."""
+    cim = max(1, consistency_implement_max)
+    consistency_block = (1 + cim) if consistency_enabled else 0
+    hp = max(1, holistic_passes)
+    return 1 + implement_max + consistency_block + 2 * hp + 1 + 1 + conflict_max
 
 
 def banner(msg: str, *, err: TextIO | None = None) -> None:

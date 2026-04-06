@@ -443,6 +443,7 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
         implement_next=prev.implement_next if prev else 1,
         improve_i=prev.improve_i if prev else 1,
         improve_j=prev.improve_j if prev else 0,
+        consistency_j=prev.consistency_j if prev else 0,
         conflict_next=prev.conflict_next if prev else 1,
         cycles_done=prev.cycles_done if prev else 0,
         max_cycles=prev.max_cycles if prev else "",

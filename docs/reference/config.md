@@ -23,7 +23,10 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
   "policy": {
     "max_phase_rounds": 20,
     "verification_required": true,
-    "merge_required": true
+    "merge_required": true,
+    "consistency_check_enabled": true,
+    "consistency_implement_max": 1,
+    "holistic_review_passes": 1
   },
   "commands": {
     "install": "pnpm install",
@@ -49,11 +52,14 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
 | `runtime_data` | Omit or any value other than `workspace` → runtime under `SPONTE_STATE_DIR` (default). `workspace` → logs, resume, plans, merge/selection locks, analytics under `.sponte/runtime/`. Overridden by `SPONTE_RUNTIME_DATA_IN_WORKSPACE`. |
 | `harness` | Built-in id or custom harness configuration from `init` |
 | `plan_model` / `execute_model` | Model strings interpreted by the harness |
-| `prompts` | Map of built-in prompt name → repo-relative markdown path (resolved at runtime; unknown keys are ignored). Active task-cycle prompt names include `plan`, `implement`, `improve`, `wrap_commit`, `verify`, and `agent_pick_task`. Notable: `agent_pick_task` — template for `sponte agent --auto` markdown-task selection (plan model); placeholders include `__BACKLOG_CANDIDATES__`, `__CLAIMED_TASKS__`, `__NEXT_TASK_FILE__`, `__TASKS_ROOT__`, and task-phase prompts also receive `__TASK_STATUS_FILE__`. |
+| `prompts` | Map of built-in prompt name → repo-relative markdown path (resolved at runtime; unknown keys are ignored). Active task-cycle prompt names include `plan`, `implement`, `improve`, `consistency_check`, `wrap_commit`, `verify`, and `agent_pick_task`. Notable: `agent_pick_task` — template for `sponte agent --auto` markdown-task selection (plan model); placeholders include `__BACKLOG_CANDIDATES__`, `__CLAIMED_TASKS__`, `__NEXT_TASK_FILE__`, `__TASKS_ROOT__`, and task-phase prompts also receive `__TASK_STATUS_FILE__`. |
 | `guardrails.path` | Workspace guardrails markdown |
 | `policy.max_phase_rounds` | Phase budget before `review-required` |
 | `policy.verification_required` | When `false`, VERIFY phase is skipped |
 | `policy.merge_required` | When `false`, trunk merge and **primary merge prechecks** are skipped after wrap/verify; you merge manually. Task worktree must still be clean for removal. |
+| `policy.consistency_check_enabled` | When `true` (default), after the task checklist is complete Sponte runs a **consistency** phase (plan model `consistency_check`, then up to `consistency_implement_max` execute passes) before holistic improve |
+| `policy.consistency_implement_max` | Execute-model passes after each consistency review (minimum `1`; default `1`) |
+| `policy.holistic_review_passes` | How many holistic improve cycles to run after consistency (each cycle: one `improve` review + one `implement` pass; minimum `1`; default `1`) |
 | `commands.install` | Optional: install or sync dependencies for this workspace |
 | `commands.dev` | Optional: local run command (e.g. dev server) |
 | `commands.check` | Optional: fast validation (lint, typecheck, or a composite script) |
@@ -85,3 +91,7 @@ Workspace `commands` reduce wasted agent turns and output volume:
 `sponte agent --execute-model opus` uses **opus** for that run even if `settings.json` says `auto`.
 
 Verify prompts use workspace `commands.verify` when set; otherwise they use `RALPH_VERIFY_COMMANDS` (documented in the repository README).
+
+## Environment defaults
+
+When a `policy` key is omitted from `settings.json`, numeric defaults come from `config/defaults.py`, including `RALPH_AUTO_FOCUS_HOLISTIC_REVIEW_PASSES` and `RALPH_AUTO_FOCUS_CONSISTENCY_IMPLEMENT_MAX` (both default `1`). The removed `RALPH_AUTO_FOCUS_IMPROVE_IMPLEMENT_MAX` is superseded by `policy.holistic_review_passes` and the single implement pass per holistic cycle.

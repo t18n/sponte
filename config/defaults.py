@@ -13,7 +13,8 @@ MAX_RESUME_ERRORS_UNLIMITED_SESSION: int = int(
 
 # --- Agent rounds ---
 IMPLEMENT_ROUNDS_MAX: int = int(os.environ.get("RALPH_AUTO_FOCUS_IMPLEMENT_ROUNDS_MAX", "15"))
-IMPROVE_IMPLEMENT_MAX: int = int(os.environ.get("RALPH_AUTO_FOCUS_IMPROVE_IMPLEMENT_MAX", "5"))
+HOLISTIC_REVIEW_PASSES: int = int(os.environ.get("RALPH_AUTO_FOCUS_HOLISTIC_REVIEW_PASSES", "1"))
+CONSISTENCY_IMPLEMENT_MAX: int = int(os.environ.get("RALPH_AUTO_FOCUS_CONSISTENCY_IMPLEMENT_MAX", "1"))
 CONFLICT_ROUNDS_MAX: int = int(os.environ.get("RALPH_AUTO_FOCUS_CONFLICT_ROUNDS_MAX", "5"))
 
 # --- Models (env mirrors old bash) ---
