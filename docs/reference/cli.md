@@ -14,8 +14,8 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 | Command | Purpose |
 | --- | --- |
-| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` wraps `--resume-session`; `--task`, `--auto`, `--resume-task` for task selection / recovery). Token-rotation threshold refresh stays inside the same loop for built-in harnesses, so normal context refresh does not require `session-resume`. `--auto` picks a backlog task using the plan model and `prompts.agent_pick_task` (not `priorities.md`) |
-| `session-resume SESSION_ID` | Resume an interrupted session by id |
+| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` wraps `--resume-session`; `--task`, `--auto`, `--resume-task` for task selection / recovery). Token-rotation threshold refresh stays inside the same loop for built-in harnesses, so normal context refresh does not require `session-resume`. `--auto` picks among pending tasks under `.sponte/tasks/` using the plan model and `prompts.agent_pick_task`. If the CLI leaves a worktree behind, it prints `session-resume` only when a valid resume file exists; otherwise it points at `task-resume` / `task-current` |
+| `session-resume SESSION_ID` | Resume an interrupted session by id; prints a one-line reason if nothing can be loaded (e.g. `missing_file`, `primary_mismatch`) |
 | `task-resume TASK_ID` | New session id; rewrites resume for existing worktree + task |
 
 ## Lifecycle / repair
@@ -33,8 +33,8 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 | `status` | Short counts + suggested next commands |
 | `session-current` | Sessions with a non-empty `active_task_id` in job `status.json` |
 | `session-show SESSION_ID` | Session job fields (key/value table) |
-| `task-list` | Files under `.sponte/tasks/backlog/` |
-| `task-priority` | `priorities.md` pending links + resolved `task_id` |
+| `task-list` | Markdown tasks under `.sponte/tasks/` (excludes `_tmp/`, `artifacts/`) |
+| `task-priority` | Optional `priorities.md` pending links + path-derived `task_id` when that file exists |
 | `task-current` | Tasks with non-empty `owning_session_id` |
 | `task-show TASK_ID` | Task job fields (key/value table) |
 | `stats` | Machine-local analytics summary + recent JSONL events (tabular) |

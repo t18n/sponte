@@ -14,3 +14,7 @@
 ## Models
 
 `plan_model` and `execute_model` are validated during `init` against the chosen harness. Invalid combinations send you back to selection; only validated values are persisted.
+
+## PLAN phase vs harness “plan mode”
+
+Sponte’s **PLAN** phase is a normal agent invocation using the **plan model** and the bundled `plan` prompt (or `prompts.plan` in `.sponte/settings.json` if set). It is **not** the same as any built-in “plan-only” or planning mode inside the harness (e.g. Cursor/Codex-specific affordances). Configure the markdown template with `prompts.plan` the same way as other prompt overrides (`prompts.agent_pick_task`, `prompts.task_display_name`, etc.).

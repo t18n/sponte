@@ -2,7 +2,15 @@
 
 ## Task
 
-Tasks are markdown files under `.sponte/tasks/`, organized by stage (`backlog`, `in-progress`, `review-required`, `completed`). Each task has a **`task_id`**: a slug from the filename stem plus a six-character hash of the **task title** only. If you change the title, the `task_id` changes.
+Tasks are markdown files anywhere under `.sponte/tasks/` (legacy staged paths such as `backlog/…` still work). Reserved subtrees `_tmp/` and `artifacts/` under tasks are excluded from selection.
+
+Each task has a **`task_id`**: `t-` plus 16 hex characters derived from the **resolved absolute path** of the task file on disk. It stays stable while the file stays at that path; renaming or moving the file changes `task_id`.
+
+**Path locks:** `.sponte/locks/tasks.lock` lists claimed tasks as newline-separated absolute paths. Claim also uses a per-task file under `.sponte/locks/tasks/`.
+
+**Display names:** After claim, Sponte may run a short `task_display_name` prompt (override via `prompts.task_display_name` in settings) and store `display_name` / `ai_summary` in the task job `status.json`.
+
+**Merged artifacts:** Sponte-created helper files can be listed under `artifacts` in job `status.json` and are copied into `.sponte/artifacts/tasks/<task_id>/` when a cycle completes successfully (that tree can be tracked in git; see root `.gitignore` rules).
 
 ## Session
 
@@ -16,10 +24,10 @@ While a task is actively worked, Sponte uses a dedicated git worktree. The path 
 
 ## Typical flow
 
-1. Backlog tasks live under `.sponte/tasks/backlog/`.
-2. `sponte agent` claims a task: generates or reuses `task_id`, takes a lock under `.sponte/locks/`, moves the task file to `in-progress`, creates the worktree, and writes job rows under `.sponte/jobs/`.
-3. Phases run in the worktree (plan, implement, verify, merge to trunk by default).
-4. On success, the task moves to `completed` and the worktree is removed.
-5. On `review-required` (policy: max phase rounds), the task moves to `review-required` and the claim is cleared so another session can pick it up with `task-resume`.
+1. Pending tasks (checklist items still open) are discoverable under `.sponte/tasks/`; `--auto` uses the plan model and `prompts.agent_pick_task` with lock-aware context.
+2. `sponte agent` claims a task: computes `task_id`, takes the per-task lock, appends the primary’s absolute task path to `tasks.lock`, creates the worktree, and writes job rows under `.sponte/jobs/`. The task file is **not** moved to `in-progress` by default.
+3. Phases run in the worktree (plan, implement, verify, merge to trunk by default). Merge serializes on the primary with both app-state branch locks and repo-local `.sponte/locks/merge.lock` (session id + configurable backoff in `merge_backoff_exponential`).
+4. On success, the task file is removed from the primary branch (`git rm` when tracked), the path is removed from `tasks.lock`, and the per-task job directory is pruned unless `cleanup_pending` is set.
+5. On `review-required` (policy: max phase rounds), the path is removed from `tasks.lock`, `review_required` is set in job status, and the claim is cleared so another session can use `task-resume`.
 
 See [session-task-ownership.md](session-task-ownership.md) for resume semantics and [task-states.md](task-states.md) for the state machine.
