@@ -3,6 +3,17 @@ from pathlib import Path
 from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
 
 
+def test_sponte_tasks_layout_valid_without_priorities_md(tmp_path: Path) -> None:
+    from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
+
+    root = tmp_path / "r"
+    td = root / TASKS_DIR
+    for stage in ("backlog", "in-progress", "review-required", "completed"):
+        (td / stage).mkdir(parents=True, exist_ok=True)
+    assert not (td / "priorities.md").is_file()
+    assert sponte_tasks_layout_valid(root)
+
+
 def test_task_path_helpers_build_workspace_paths(tmp_path: Path) -> None:
     from ralph_focus.tasks import priorities_file, task_file_path, task_rel_path
 
