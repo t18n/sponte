@@ -11,10 +11,17 @@ from ralph_focus.task_jobs import (
     SessionJobStatus,
     TaskJobStatus,
     read_session_job_status,
+    read_task_job_status,
     write_session_job_status,
     write_task_job_status,
 )
-from ralph_focus.task_lifecycle import cancel_task, prepare_task_resume, task_cleanup
+from ralph_focus.task_lifecycle import (
+    cancel_task,
+    migrate_task_job_ids,
+    prepare_task_resume,
+    task_cleanup,
+)
+from ralph_focus.tasks import task_id_from_resolved_path
 
 
 def test_cancel_unknown_task(tmp_path: Path) -> None:
@@ -196,3 +203,107 @@ def test_prepare_task_resume_carries_previous_state_and_clears_old_session(
     old_status = read_session_job_status(tmp_path, old_session)
     assert old_status is not None
     assert old_status.active_task_id == ""
+
+
+def test_cleanup_prunes_tasks_lock_missing_paths(tmp_path: Path) -> None:
+    from ralph_focus.tasks_lock_registry import read_tasks_lock_paths, write_tasks_lock_paths
+
+    ghost = tmp_path / "nowhere" / "gone.md"
+    write_tasks_lock_paths(tmp_path, {ghost})
+    n, notes = task_cleanup(tmp_path)
+    assert n >= 1
+    assert len(read_tasks_lock_paths(tmp_path)) == 0
+    assert any("tasks.lock" in x for x in notes)
+
+
+def test_cleanup_prunes_deferred_completed_job_dir(tmp_path: Path) -> None:
+    tid = "t-cleanuppending01"
+    job = sponte_job_task_dir(tmp_path, tid)
+    job.mkdir(parents=True, exist_ok=True)
+    (job / "status.json").write_text(
+        json.dumps(
+            {
+                "task_id": tid,
+                "rel_task": ".sponte/tasks/missing-never-created.md",
+                "stage": "completed",
+                "completed": True,
+                "cleanup_pending": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    n, notes = task_cleanup(tmp_path)
+    assert n >= 1
+    assert any("cleanup_pending" in x for x in notes)
+    assert not job.is_dir()
+
+
+def test_cleanup_skips_deferred_prune_when_task_file_remains(tmp_path: Path) -> None:
+    task_rel = ".sponte/tasks/still-here.md"
+    p = tmp_path / task_rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("- [x] done\n", encoding="utf-8")
+    tid = "t-stillhere01"
+    job = sponte_job_task_dir(tmp_path, tid)
+    job.mkdir(parents=True, exist_ok=True)
+    (job / "status.json").write_text(
+        json.dumps(
+            {
+                "task_id": tid,
+                "rel_task": task_rel,
+                "stage": "completed",
+                "completed": True,
+                "cleanup_pending": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    task_cleanup(tmp_path)
+    assert job.is_dir()
+
+
+def test_migrate_task_job_ids_rewrites_folder_and_session_pointer(tmp_path: Path) -> None:
+    task_rel = ".sponte/tasks/flat.md"
+    task_path = tmp_path / task_rel
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text("# t\n\n- [ ] x\n", encoding="utf-8")
+    expected = task_id_from_resolved_path(task_path.resolve())
+    legacy_id = "legacy-slug-abc123"
+    write_task_job_status(
+        tmp_path,
+        TaskJobStatus(
+            task_id=legacy_id,
+            rel_task=task_rel,
+            stage="backlog",
+            task_title="Flat",
+        ),
+    )
+    old_job = sponte_job_task_dir(tmp_path, legacy_id)
+    assert old_job.is_dir()
+
+    write_session_job_status(
+        tmp_path,
+        SessionJobStatus(
+            session_id="rap-migrate01",
+            workspace_root=str(tmp_path.resolve()),
+            active_task_id=legacy_id,
+            rel_task=task_rel,
+            phase="PLAN",
+            worktree_path=str(tmp_path / "wt"),
+            branch="b",
+        ),
+    )
+    m, mnotes = migrate_task_job_ids(tmp_path)
+    assert m == 1
+    assert any("migrated" in x for x in mnotes)
+    assert not old_job.is_dir()
+    new_job = sponte_job_task_dir(tmp_path, expected)
+    assert new_job.is_dir()
+    st = read_task_job_status(tmp_path, expected)
+    assert st is not None
+    assert st.task_id == expected
+    sess = read_session_job_status(tmp_path, "rap-migrate01")
+    assert sess is not None
+    assert sess.active_task_id == expected
