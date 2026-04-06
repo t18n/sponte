@@ -174,7 +174,7 @@ It will:
 1. validate that `.sponte/tasks` already exists
 2. prompt for one or more task titles, goals, and verification commands
 3. write task markdown files under `.sponte/tasks/backlog/`
-4. refresh `.sponte/tasks/priorities.md`
+4. refresh `.sponte/tasks/priorities.md` (human-readable index; `sponte agent --auto` picks from the backlog via the plan model, not this file)
 
 ## Recovery Flow
 

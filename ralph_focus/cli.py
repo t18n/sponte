@@ -335,7 +335,7 @@ def _print_auto_focus_settings(
             t.add_row("Session ends (UTC)", session_deadline_epoch)
     t.add_row("Cleanup worktree on interrupt", "yes" if cleanup_on_exit else "no")
     t.add_row("Allow agent task pick", "yes" if allow_agent_pick else "no")
-    t.add_row("Explicit task", task_arg if task_arg else f"(from {TASKS_DIR}/priorities.md)")
+    t.add_row("Explicit task", task_arg if task_arg else "(plan-model backlog pick)")
     t.add_row("Resuming prior cycle", "yes" if resuming else "no")
     if resume_task_recovery_mode:
         t.add_row("Task-scoped recovery", "single cycle then exit")
@@ -550,7 +550,7 @@ def cmd_agent(
         bool,
         typer.Option(
             "--auto",
-            help="Pick next pending task from priorities.md, then backlog (requires initialized task store)",
+            help="Pick next backlog task via plan model (lock-aware; prompt: prompts.agent_pick_task)",
         ),
     ] = False,
     allow_agent_pick: Annotated[

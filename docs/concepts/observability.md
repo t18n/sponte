@@ -5,7 +5,7 @@
 - **`sponte status`** — quick counts: active sessions/tasks from the job index, backlog size, hints for next commands.
 - **`session-current`**, **`task-current`** — tables from `.sponte/jobs/*/status.json`.
 - **`session-show`**, **`task-show`** — key/value panels for one id.
-- **`task-list`**, **`task-priority`** — backlog files and `priorities.md` with resolved `task_id`s.
+- **`task-list`**, **`task-priority`** — backlog files and `priorities.md` links with resolved `task_id`s (human-facing index; `sponte agent --auto` does not order work from this file).
 
 ## Machine-local stats
 

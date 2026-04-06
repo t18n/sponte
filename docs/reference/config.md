@@ -15,7 +15,8 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
   "execute_model": "auto",
   "prompts": {
     "implement": ".sponte/prompts/implement.md",
-    "followup_tickets": ".sponte/prompts/followup_tickets.md"
+    "followup_tickets": ".sponte/prompts/followup_tickets.md",
+    "agent_pick_task": ".sponte/prompts/agent_pick_task.md"
   },
   "guardrails": {
     "path": ".sponte/guardrails.md"
@@ -48,7 +49,7 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
 | `worktree_root` | Where Sponte creates task worktrees (relative to repo root unless absolute) |
 | `harness` | Built-in id or custom harness configuration from `init` |
 | `plan_model` / `execute_model` | Model strings interpreted by the harness |
-| `prompts` | Map of built-in prompt name → repo-relative markdown path |
+| `prompts` | Map of built-in prompt name → repo-relative markdown path (resolved at runtime; unknown keys are ignored). Notable: `agent_pick_task` — template for `sponte agent --auto` backlog selection (plan model); placeholders include `__BACKLOG_CANDIDATES__`, `__CLAIMED_TASKS__`, `__NEXT_TASK_FILE__`, `__TASKS_ROOT__`, etc. |
 | `guardrails.path` | Workspace guardrails markdown |
 | `policy.max_phase_rounds` | Phase budget before `review-required` |
 | `policy.verification_required` | When `false`, VERIFY phase is skipped |

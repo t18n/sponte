@@ -775,3 +775,5 @@ def test_agent_help_uses_session_language_for_resume_option() -> None:
     assert "--resume-session" in result.stdout
     assert "--resume-task" in result.stdout
     assert "--task" in result.stdout
+    assert "--auto" in result.stdout
+    assert "plan model" in result.stdout.lower()

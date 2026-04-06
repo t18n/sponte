@@ -31,7 +31,7 @@ Add one or more backlog tasks. Optionally edit markdown under `.sponte/tasks/bac
 sponte agent --workspace /path/to/repo --task /path/to/repo/.sponte/tasks/backlog/my-task.md
 ```
 
-Or use `sponte agent --workspace /path/to/repo --auto` so Sponte picks the next pending task from `priorities.md` (requires an existing `.sponte/tasks/` tree). Use `sponte status` and `sponte task-current` to see ownership.
+Or use `sponte agent --workspace /path/to/repo --auto` so Sponte picks the next pending backlog task with the **plan model** (lock-aware: it sees claimed tasks under `.sponte/jobs/`). Override the selection prompt via `.sponte/settings.json` → `prompts.agent_pick_task` (repo-relative markdown). Use `sponte status` and `sponte task-current` to see ownership.
 
 ## Learn more
 

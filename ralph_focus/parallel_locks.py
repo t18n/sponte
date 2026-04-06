@@ -1,9 +1,13 @@
 """Cooperative locks for parallel auto-focus (same repo, multiple terminals).
 
-Lock ordering (avoid deadlock): never acquire selection/agent-pick locks while holding
-``merge-into-<branch>.lock``. Typical flow: selection.lock (brief) -> per-task lock ->
-... work ... -> merge-into-main.lock (or master/…) for checkout on primary + merge +
-worktree teardown (only one Ralph merges into that branch at a time).
+Lock ordering (avoid deadlock): never acquire ``agent-pick.lock`` while holding
+``merge-into-<branch>.lock``. Typical flow: ``agent-pick.lock`` (brief, during plan-model
+task selection) -> per-task claim lock under ``.sponte/locks/tasks/`` -> ... work ...
+-> ``merge-into-<branch>.lock`` for checkout on primary + merge + worktree teardown
+(only one Ralph merges into that branch at a time).
+
+``selection.lock`` remains a path helper for tooling; backlog selection uses
+``agent-pick.lock`` only.
 """
 
 from __future__ import annotations

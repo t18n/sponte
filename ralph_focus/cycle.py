@@ -30,7 +30,6 @@ from config.defaults import (
     RESUME_SCHEMA_VERSION,
     ROTATE_THRESHOLD_TOKENS,
     ROTATE_WARN_THRESHOLD_TOKENS,
-    SELECTION_LOCK_TIMEOUT_SEC,
     TASKS_DIR,
 )
 from ralph_focus.contracts import FailureContext, Harness, RunRequest
@@ -59,7 +58,6 @@ from ralph_focus.paths import (
     readable_base_sha_file,
     rotation_handoff_file,
     sanitize_job_segment,
-    selection_lock_path,
     worktrees_base,
     workspace_task_claim_lock_path,
 )
@@ -89,17 +87,20 @@ from ralph_focus.task_jobs import (
     write_session_job_status,
     write_task_job_status,
 )
-from ralph_focus.task_lifecycle import _clear_session_active_task, _restore_task_to_backlog
+from ralph_focus.task_lifecycle import (
+    _clear_session_active_task,
+    _restore_task_to_backlog,
+    format_claimed_tasks_snapshot,
+)
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
 from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.tasks import (
     compute_task_id,
     concrete_task_rel,
     count_checklist,
+    format_pending_backlog_for_prompt,
     normalize_task_path,
     normalize_task_rel,
-    priorities_file,
-    priority_task_paths_pending,
     task_has_pending,
     task_label,
     task_stage,
@@ -1570,19 +1571,6 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
             return (2, None)
         return (0, p)
 
-    pri_file = priorities_file(primary)
-    sel_lp = selection_lock_path(primary)
-    try:
-        acquire_lock_blocking(sel_lp, timeout_sec=SELECTION_LOCK_TIMEOUT_SEC)
-    except LockWaitTimeoutError:
-        return (1, None)
-    try:
-        for p in priority_task_paths_pending(pri_file, primary):
-            if _take_task_and_claim_lock(p):
-                return (0, p)
-    finally:
-        release_lock(sel_lp)
-
     if not cfg.allow_agent_pick:
         return (2, None)
 
@@ -1614,9 +1602,17 @@ def _agent_pick_backlog_task(cfg: AutoFocusConfig) -> Path | None:
         )
         / "agent-pick.log"
     )
-    body = render_prompt("agent_pick_task", primary=primary, task_rel="", plan_rel="")
+    body = render_prompt(
+        "agent_pick_task",
+        primary=primary,
+        task_rel="",
+        plan_rel="",
+        verify_commands="",
+        claimed_tasks_snapshot=format_claimed_tasks_snapshot(primary),
+        backlog_candidates=format_pending_backlog_for_prompt(primary),
+    )
     _append_phase_log(logf, "AGENT_PICK_TASK")
-    if cfg._run_agent(primary, cfg.execute_model, body, logf, "AGENT_PICK_TASK") != 0:
+    if cfg._run_agent(primary, cfg.plan_model, body, logf, "AGENT_PICK_TASK") != 0:
         return None
     if not nf.is_file():
         return None

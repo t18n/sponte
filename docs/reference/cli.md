@@ -14,7 +14,7 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 | Command | Purpose |
 | --- | --- |
-| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` wraps `--resume-session`; `--task`, `--auto`, `--resume-task` for task selection / recovery) |
+| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` wraps `--resume-session`; `--task`, `--auto`, `--resume-task` for task selection / recovery). `--auto` picks a backlog task using the plan model and `prompts.agent_pick_task` (not `priorities.md`) |
 | `session-resume SESSION_ID` | Resume an interrupted session by id |
 | `task-resume TASK_ID` | New session id; rewrites resume for existing worktree + task |
 

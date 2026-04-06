@@ -378,6 +378,26 @@ def iter_task_status_files(repo: Path) -> list[Path]:
     return sorted(root.glob("*/status.json"))
 
 
+def format_claimed_tasks_snapshot(repo: Path) -> str:
+    """
+    Markdown summary of tasks with a non-empty ``owning_session_id`` in the job index.
+    Used by auto task selection to steer away from in-flight work.
+    """
+    lines: list[str] = []
+    for p in iter_task_status_files(repo):
+        tid = p.parent.name
+        st = read_task_job_status(repo, tid)
+        if st is None or not st.owning_session_id.strip():
+            continue
+        lines.append(
+            f"- `{st.rel_task}` (task_id=`{st.task_id}`, session=`{st.owning_session_id}`, "
+            f"title={st.task_title!r})"
+        )
+    if not lines:
+        return "_(No tasks are currently claimed by an active session; see `.sponte/jobs/tasks/`.)_"
+    return "\n".join(lines)
+
+
 def list_backlog_tasks(repo: Path) -> list[Path]:
     return sorted((repo / TASKS_DIR / "backlog").rglob("*.md"))
 
@@ -385,6 +405,7 @@ def list_backlog_tasks(repo: Path) -> list[Path]:
 __all__ = [
     "cancel_all_active_tasks",
     "cancel_task",
+    "format_claimed_tasks_snapshot",
     "iter_session_status_files",
     "iter_task_status_files",
     "list_backlog_tasks",

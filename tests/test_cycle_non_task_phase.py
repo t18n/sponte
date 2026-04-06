@@ -330,7 +330,10 @@ def test_agent_pick_backlog_task_resolves_legacy_layout(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(cycle, "_append_phase_log", lambda *_args, **_kwargs: None)
 
-    def fake_run_agent(_cwd: Path, _model: str, _body: str, _logf: Path, _label: str) -> int:
+    models_seen: list[str] = []
+
+    def fake_run_agent(_cwd: Path, model: str, _body: str, _logf: Path, _label: str) -> int:
+        models_seen.append(model)
         nf.write_text(f"{LEGACY_TASKS_DIR}/backlog/example.md\n", encoding="utf-8")
         return 0
 
@@ -339,3 +342,4 @@ def test_agent_pick_backlog_task_resolves_legacy_layout(monkeypatch: pytest.Monk
     picked = _agent_pick_backlog_task(cfg)
 
     assert picked == legacy_task
+    assert models_seen == ["planner"]

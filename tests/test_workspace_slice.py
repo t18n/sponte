@@ -71,7 +71,10 @@ def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
             harness="codex",
             plan_model="o1",
             execute_model="gpt-4",
-            prompts={"implement": ".sponte/prompts/implement.md"},
+            prompts={
+                "implement": ".sponte/prompts/implement.md",
+                "agent_pick_task": ".sponte/prompts/agent_pick_task.md",
+            },
             guardrails_path=".sponte/guardrails.md",
             policy=policy,
         ),
@@ -81,6 +84,7 @@ def test_workspace_settings_roundtrip(tmp_path: Path) -> None:
     assert again.plan_model == "o1"
     assert again.execute_model == "gpt-4"
     assert again.prompts.get("implement") == ".sponte/prompts/implement.md"
+    assert again.prompts.get("agent_pick_task") == ".sponte/prompts/agent_pick_task.md"
     assert again.normalized_guardrails_path() == ".sponte/guardrails.md"
     assert again.policy.max_phase_rounds == 12
     assert again.policy.verification_required is False

@@ -224,3 +224,22 @@ def compute_task_id(*, task_stem: str, task_title: str) -> str:
     slug_source = task_title.strip() or stem
     slug = slugify_task_name_for_id(slug_source)
     return f"{slug}-{task_title_hash_suffix(task_title)}"
+
+
+def pending_backlog_task_paths(repo: Path) -> list[Path]:
+    """Backlog markdown tasks under the active task root that still have pending checklist items."""
+    backlog = repo / task_root(repo) / "backlog"
+    if not backlog.is_dir():
+        return []
+    return sorted(p for p in backlog.rglob("*.md") if p.is_file() and task_has_pending(p))
+
+
+def format_pending_backlog_for_prompt(repo: Path) -> str:
+    """Markdown bullet list of pending backlog tasks for agent prompts."""
+    lines: list[str] = []
+    for p in pending_backlog_task_paths(repo):
+        rel = p.relative_to(repo).as_posix()
+        lines.append(f"- `{rel}` — {task_label(p)}")
+    if not lines:
+        return "_(No pending tasks in backlog.)_"
+    return "\n".join(lines)

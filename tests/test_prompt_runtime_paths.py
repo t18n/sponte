@@ -25,9 +25,11 @@ def test_render_prompt_injects_next_task_file_for_agent_pick(tmp_path: Path, mon
 
     rendered = render_prompt("agent_pick_task", primary=tmp_path, task_rel="", plan_rel="")
 
-    assert f"{TASKS_DIR}/backlog/*.md" in rendered
+    assert f"{TASKS_DIR}/backlog/" in rendered
     assert str(next_task_file(tmp_path)) in rendered
     assert ".agents/" not in rendered
+    assert "__BACKLOG_CANDIDATES__" not in rendered
+    assert "__CLAIMED_TASKS__" not in rendered
 
 
 def test_render_prompt_uses_legacy_task_root_when_repo_still_uses_legacy_layout(tmp_path: Path, monkeypatch) -> None:
@@ -40,7 +42,7 @@ def test_render_prompt_uses_legacy_task_root_when_repo_still_uses_legacy_layout(
 
     rendered = render_prompt("agent_pick_task", primary=tmp_path, task_rel="", plan_rel="")
 
-    assert f"{LEGACY_TASKS_DIR}/backlog/*.md" in rendered
+    assert f"{LEGACY_TASKS_DIR}/backlog/" in rendered
 
 
 def test_rendered_active_prompts_mention_workspace_instruction_files(tmp_path: Path) -> None:
@@ -55,3 +57,22 @@ def test_rendered_active_prompts_mention_workspace_instruction_files(tmp_path: P
         )
         assert "AGENTS.md" in rendered
         assert "CLAUDE.md" in rendered
+
+
+def test_render_prompt_resolves_workspace_prompt_override(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "state"))
+    from ralph_focus.prompts import render_prompt, resolve_prompt_template_path
+    from ralph_focus.workspace_settings import WorkspaceSettings, save_workspace_settings
+
+    (tmp_path / ".sponte").mkdir(parents=True)
+    custom = tmp_path / ".sponte" / "prompts" / "pick.md"
+    custom.parent.mkdir(parents=True, exist_ok=True)
+    custom.write_text("# Workspace override\nPick to __NEXT_TASK_FILE__\n", encoding="utf-8")
+    save_workspace_settings(
+        tmp_path,
+        WorkspaceSettings(prompts={"agent_pick_task": ".sponte/prompts/pick.md"}),
+    )
+
+    assert resolve_prompt_template_path("agent_pick_task", tmp_path) == custom
+    rendered = render_prompt("agent_pick_task", primary=tmp_path, task_rel="", plan_rel="")
+    assert "Workspace override" in rendered
