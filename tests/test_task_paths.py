@@ -7,10 +7,7 @@ def test_sponte_tasks_layout_valid_without_priorities_md(tmp_path: Path) -> None
     from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
     root = tmp_path / "r"
-    td = root / TASKS_DIR
-    for stage in ("backlog", "in-progress", "review-required", "completed"):
-        (td / stage).mkdir(parents=True, exist_ok=True)
-    assert not (td / "priorities.md").is_file()
+    (root / TASKS_DIR).mkdir(parents=True)
     assert sponte_tasks_layout_valid(root)
 
 

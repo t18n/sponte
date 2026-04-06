@@ -228,7 +228,6 @@ def test_init_sponte_allows_empty_task_store(tmp_path: Path) -> None:
 
     assert sponte_tasks_layout_valid(root)
     assert (root / TASKS_DIR / "backlog").is_dir()
-    assert (root / TASKS_DIR / "priorities.md").is_file()
     assert worktrees_base(root).is_dir()
 
 
@@ -373,7 +372,6 @@ def test_init_cli_initializes_workspace_without_running_cycle(monkeypatch: pytes
     assert result.exit_code == 0
     assert seen["run_one_cycle"] == 0
     assert (root / TASKS_DIR / "backlog").is_dir()
-    assert (root / TASKS_DIR / "priorities.md").is_file()
 
 
 def test_init_cli_refreshes_commands_when_already_initialized(
@@ -435,8 +433,6 @@ def test_plan_cli_creates_task_for_initialized_workspace(
     text = created.read_text(encoding="utf-8")
     assert "task: CLI init redesign" in text
     assert "test_command: uv run pytest -q" in text
-    priorities = (root / TASKS_DIR / "priorities.md").read_text(encoding="utf-8")
-    assert "./backlog/cli-init-redesign.md" in priorities
 
 
 def test_plan_cli_uses_workspace_default_test_command(

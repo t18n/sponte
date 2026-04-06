@@ -3,7 +3,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from config.defaults import TASKS_DIR
-from ralph_focus.resume import ResumeState
+from ralph_focus.resume import ResumeLoadFailureReason, ResumeState
 from ralph_focus.task_jobs import SessionJobStatus, TaskJobStatus, write_session_job_status, write_task_job_status
 from ralph_focus.workspace_analytics import AnalyticsSummary
 
@@ -206,6 +206,11 @@ def test_auto_focus_auto_skips_on_fatal_and_continues(monkeypatch, tmp_path: Pat
     )
     monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: harness, raising=False)
     monkeypatch.setattr(cli, "load_resume", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda *_a, **_k: (None, ResumeLoadFailureReason.missing_file),
+    )
 
     def fake_abandon(c, *, resume_hint=None) -> None:
         c.current_wt_path = None
@@ -295,6 +300,11 @@ def test_auto_focus_resume_uses_saved_harness_and_models_for_preflight_and_confi
     monkeypatch.setattr(cli, "load_resume", lambda _primary, runner_id: resume_state)
     monkeypatch.setattr(
         cli,
+        "load_resume_detailed",
+        lambda *args, runner_id="default", **kwargs: (resume_state, None),
+    )
+    monkeypatch.setattr(
+        cli,
             "run_preflight",
             lambda *, agent, console, verbose, workspace_root=None: seen.setdefault("preflight_agent", agent),
         )
@@ -368,6 +378,11 @@ def test_auto_focus_resume_prints_restored_task_pick_settings(monkeypatch, tmp_p
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "load_resume", lambda _primary, runner_id: resume_state)
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda *args, runner_id="default", **kwargs: (resume_state, None),
+    )
     monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: _Harness(name), raising=False)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
@@ -436,6 +451,15 @@ def test_auto_focus_resume_task_runs_single_resume_cycle(monkeypatch, tmp_path: 
         cli,
         "load_resume",
         lambda primary, runner_id: resume_state if runner_id == "gen-orphan" else None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda _p, runner_id: (
+            (resume_state, None)
+            if runner_id == "gen-orphan"
+            else (None, ResumeLoadFailureReason.missing_file)
+        ),
     )
     monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
@@ -514,6 +538,15 @@ def test_auto_focus_resume_task_ignores_saved_cycle_count_for_one_attempt(
         "load_resume",
         lambda primary, runner_id: resume_state if runner_id == "gen-orphan" else None,
     )
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda _p, runner_id: (
+            (resume_state, None)
+            if runner_id == "gen-orphan"
+            else (None, ResumeLoadFailureReason.missing_file)
+        ),
+    )
     monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
@@ -588,6 +621,15 @@ def test_auto_focus_resume_task_ignores_expired_saved_deadline(monkeypatch, tmp_
         cli,
         "load_resume",
         lambda primary, runner_id: resume_state if runner_id == "gen-orphan" else None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda _p, runner_id: (
+            (resume_state, None)
+            if runner_id == "gen-orphan"
+            else (None, ResumeLoadFailureReason.missing_file)
+        ),
     )
     monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
@@ -875,6 +917,7 @@ def test_auto_focus_rotation_falls_back_to_manual_resume_when_harness_cannot_ref
     monkeypatch.setattr(cli, "_write_rotation_handoff", lambda **_kwargs: handoff_path)
     monkeypatch.setattr(cli, "_print_rotation_handoff_inline", lambda **_kwargs: None)
     monkeypatch.setattr(cli, "run_one_cycle", lambda *_args, **_kwargs: 3)
+    monkeypatch.setattr(cli, "load_resume_detailed", lambda *_a, **_k: (ResumeState(primary=str(tmp_path.resolve())), None))
 
     runner = CliRunner()
     result = runner.invoke(

@@ -213,6 +213,7 @@ def test_primary_premerge_returns_error_when_commit_no_edit_fails(monkeypatch: p
 
 def test_move_completed_on_primary_moves_task_and_commits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from ralph_focus import cycle
+    from ralph_focus.tasks import task_id_from_resolved_path
 
     rel = f"{TASKS_DIR}/in-progress/example.md"
     task_path = tmp_path / rel
@@ -227,39 +228,43 @@ def test_move_completed_on_primary_moves_task_and_commits(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(cycle, "git", fake_git)
 
-    cycle._move_completed_on_primary(tmp_path, rel)
-
-    assert git_calls[0] == (
-        tmp_path,
-        ("mv", rel, f"{TASKS_DIR}/completed/example.md"),
+    tid = task_id_from_resolved_path(task_path.resolve())
+    cfg = cycle.AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(rc=0, usage={}),
+        plan_model="p",
+        execute_model="e",
+        task_id=tid,
     )
+    cycle._move_completed_on_primary(cfg, rel)
+
+    assert git_calls[0] == (tmp_path, ("rm", "-f", "--ignore-unmatch", rel))
     assert git_calls[1][0] == tmp_path
     assert git_calls[1][1][-2:] == ("-m", "chore(tasks): complete example.md")
 
 
-def test_claim_task_in_worktree_preserves_legacy_task_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_claim_task_on_primary_appends_tasks_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from ralph_focus import cycle
+    from ralph_focus.tasks import task_id_from_resolved_path
+    from ralph_focus.tasks_lock_registry import read_tasks_lock_paths
 
     logf = tmp_path / "claim.log"
     legacy_rel = f"{LEGACY_TASKS_DIR}/backlog/example.md"
     legacy_src = tmp_path / legacy_rel
     legacy_src.parent.mkdir(parents=True, exist_ok=True)
     legacy_src.write_text('task: "Example"\n- [ ] item\n', encoding="utf-8")
-    git_calls: list[tuple[Path, tuple[str, ...]]] = []
-
-    def fake_git(cwd: Path, *args: str) -> tuple[int, str, str]:
-        git_calls.append((cwd, args))
-        return 0, "", ""
-
-    monkeypatch.setattr(cycle, "git", fake_git)
-
-    dest = cycle._claim_task_in_worktree(tmp_path, legacy_rel, logf)
-
-    assert dest == f"{LEGACY_TASKS_DIR}/in-progress/example.md"
-    assert git_calls[0] == (
-        tmp_path,
-        ("mv", legacy_rel, f"{LEGACY_TASKS_DIR}/in-progress/example.md"),
+    tid = task_id_from_resolved_path(legacy_src.resolve())
+    cfg = cycle.AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(rc=0, usage={}),
+        plan_model="p",
+        execute_model="e",
+        task_id=tid,
     )
+    dest = cycle._claim_task_on_primary(cfg, legacy_src, legacy_rel, logf)
+    assert dest == legacy_rel
+    locked = read_tasks_lock_paths(tmp_path)
+    assert legacy_src.resolve() in locked
 
 
 def test_auto_finalize_task_branch_reads_legacy_base_sha(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -292,6 +297,7 @@ def test_auto_finalize_task_branch_reads_legacy_base_sha(monkeypatch: pytest.Mon
 
 def test_move_completed_on_primary_preserves_legacy_task_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from ralph_focus import cycle
+    from ralph_focus.tasks import task_id_from_resolved_path
 
     rel = f"{LEGACY_TASKS_DIR}/in-progress/example.md"
     task_path = tmp_path / rel
@@ -305,12 +311,17 @@ def test_move_completed_on_primary_preserves_legacy_task_layout(monkeypatch: pyt
 
     monkeypatch.setattr(cycle, "git", fake_git)
 
-    cycle._move_completed_on_primary(tmp_path, rel)
-
-    assert git_calls[0] == (
-        tmp_path,
-        ("mv", rel, f"{LEGACY_TASKS_DIR}/completed/example.md"),
+    tid = task_id_from_resolved_path(task_path.resolve())
+    cfg = cycle.AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(rc=0, usage={}),
+        plan_model="p",
+        execute_model="e",
+        task_id=tid,
     )
+    cycle._move_completed_on_primary(cfg, rel)
+
+    assert git_calls[0] == (tmp_path, ("rm", "-f", "--ignore-unmatch", rel))
 
 
 def test_agent_pick_backlog_task_resolves_legacy_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
