@@ -217,3 +217,18 @@ def workspace_sponte_locks_dir(root: Path) -> Path:
 def workspace_task_claim_lock_path(root: Path, task_id: str) -> Path:
     """Exclusive claim lock for a task id (prevents duplicate active claims)."""
     return workspace_sponte_locks_dir(root) / "tasks" / f"{sanitize_job_segment(task_id)}.lock"
+
+
+def naming_reply_file(workspace_root: Path, task_id: str) -> Path:
+    """App-state file where the task naming prompt writes one JSON object."""
+    return ralph_data_dir(workspace_root) / "naming" / f"{sanitize_job_segment(task_id)}.json"
+
+
+def sponte_task_work_tmp_dir(root: Path, task_id: str) -> Path:
+    """Ignored runtime dir for Sponte-owned helper docs (``_tmp``)."""
+    return workspace_sponte_dir(root) / "tasks" / "_tmp" / sanitize_job_segment(task_id)
+
+
+def sponte_tracked_task_artifacts_dir(root: Path, task_id: str) -> Path:
+    """Tracked (when gitignored) archive root for merged task artifacts."""
+    return workspace_sponte_dir(root) / "artifacts" / "tasks" / sanitize_job_segment(task_id)
