@@ -83,6 +83,7 @@ from ralph_focus.task_lifecycle import (
 )
 from ralph_focus.tasks import (
     count_checklist,
+    normalize_task_path,
     task_id_from_resolved_path,
     task_label,
     task_root,
@@ -248,8 +249,7 @@ def _write_rotation_handoff(
     resume_state = load_resume(primary, runner_id=runner_id)
     if resume_state is None:
         return None
-    wt_path = Path(resume_state.wt_path)
-    task_path = wt_path / resume_state.rel_task
+    task_path = normalize_task_path(primary, resume_state.rel_task)
     pending_count, done_count = count_checklist(task_path)
     title = task_label(task_path) if task_path.is_file() else resume_state.rel_task
     content = _rotation_handoff_markdown(

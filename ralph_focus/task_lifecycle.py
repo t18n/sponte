@@ -33,6 +33,7 @@ from ralph_focus.task_jobs import (
 )
 from ralph_focus.tasks import (
     concrete_task_rel,
+    normalize_task_path,
     task_id_from_resolved_path,
     task_stage,
     task_with_stage,
@@ -403,8 +404,8 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
     if not wt.is_dir() or not worktree_registered(repo, wt):
         return None, "worktree missing or not registered; try task-cleanup"
     rel_task = (st.rel_task or "").strip()
-    if not rel_task or not (wt / rel_task).is_file():
-        return None, "task file missing in worktree"
+    if not rel_task or not normalize_task_path(repo, rel_task).is_file():
+        return None, "task file missing under workspace root"
 
     old_sess = (st.owning_session_id or "").strip()
     prev = load_resume(repo, runner_id=old_sess) if old_sess else None

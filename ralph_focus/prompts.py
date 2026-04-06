@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from ralph_focus.paths import guardrails_markdown_path, next_task_file, progress_markdown_path, sponte_job_task_dir
-from ralph_focus.tasks import task_root
+from ralph_focus.tasks import normalize_task_path, task_root
 
 
 def _ralph_root() -> Path:
@@ -93,14 +93,22 @@ def substitute(
 ) -> str:
     task_status_file = ""
     if task_id.strip():
-        task_status_file = (sponte_job_task_dir(primary, task_id) / "status.json").as_posix()
+        task_status_file = (sponte_job_task_dir(primary, task_id) / "status.json").resolve().as_posix()
+    # Agents run with cwd in the git worktree; ``.sponte/`` is usually gitignored and absent there.
+    # Use resolved primary paths so harness tools can open task/guardrails/progress reliably.
+    task_file_for_prompt = task_rel.strip()
+    if task_file_for_prompt:
+        task_file_for_prompt = normalize_task_path(primary, task_rel).resolve().as_posix()
+    guardrails_abs = guardrails_markdown_path(primary).resolve().as_posix()
+    progress_abs = progress_markdown_path(primary).resolve().as_posix()
+    next_pick_abs = next_task_file(primary).resolve().as_posix()
     return (
-        template.replace("__TASK_FILE__", task_rel)
+        template.replace("__TASK_FILE__", task_file_for_prompt)
         .replace("__PLAN_FILE__", plan_rel)
         .replace("__TASKS_ROOT__", task_root(primary))
-        .replace("__GUARDRAILS_FILE__", guardrails_markdown_path(primary).relative_to(primary).as_posix())
-        .replace("__PROGRESS_FILE__", progress_markdown_path(primary).relative_to(primary).as_posix())
-        .replace("__NEXT_TASK_FILE__", next_task_file(primary).as_posix())
+        .replace("__GUARDRAILS_FILE__", guardrails_abs)
+        .replace("__PROGRESS_FILE__", progress_abs)
+        .replace("__NEXT_TASK_FILE__", next_pick_abs)
         .replace("__VERIFY_COMMANDS__", verify_commands)
         .replace("__CLAIMED_TASKS__", claimed_tasks_snapshot)
         .replace("__BACKLOG_CANDIDATES__", backlog_candidates)

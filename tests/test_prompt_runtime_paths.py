@@ -15,7 +15,23 @@ def test_render_prompt_uses_sponte_guardrails_path(tmp_path: Path) -> None:
     )
 
     assert SPONTE_GUARDRAILS_PATH in rendered
+    assert str(tmp_path.resolve()) in rendered
     assert ".agents/" not in rendered
+
+
+def test_render_prompt_task_file_is_resolved_primary_path(tmp_path: Path) -> None:
+    from ralph_focus.prompts import render_prompt
+
+    task_path = tmp_path / TASKS_DIR / "backlog" / "example.md"
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text("# Example\n", encoding="utf-8")
+    rendered = render_prompt(
+        "plan",
+        primary=tmp_path,
+        task_rel=f"{TASKS_DIR}/backlog/example.md",
+        plan_rel="/tmp/plan.md",
+    )
+    assert task_path.resolve().as_posix() in rendered
 
 
 def test_render_prompt_injects_next_task_file_for_agent_pick(tmp_path: Path, monkeypatch) -> None:
@@ -26,7 +42,7 @@ def test_render_prompt_injects_next_task_file_for_agent_pick(tmp_path: Path, mon
     rendered = render_prompt("agent_pick_task", primary=tmp_path, task_rel="", plan_rel="")
 
     assert TASKS_DIR in rendered
-    assert str(next_task_file(tmp_path)) in rendered
+    assert next_task_file(tmp_path).resolve().as_posix() in rendered
     assert ".agents/" not in rendered
     assert "__BACKLOG_CANDIDATES__" not in rendered
     assert "__CLAIMED_TASKS__" not in rendered

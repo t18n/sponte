@@ -490,7 +490,7 @@ def _sync_job_status_files(
     if not cfg.task_id.strip():
         return
     title = ""
-    tp = wt_path / rel_task
+    tp = normalize_task_path(cfg.primary, rel_task)
     if tp.is_file():
         title = task_label(tp)
     prev = read_task_job_status(cfg.primary, cfg.task_id)
@@ -544,7 +544,7 @@ def _finalize_review_required(
     except OSError:
         pass
     title = ""
-    tp = wt_path / new_rel
+    tp = normalize_task_path(primary, new_rel)
     if tp.is_file():
         title = task_label(tp)
     prev = read_task_job_status(primary, cfg.task_id)
@@ -613,7 +613,7 @@ def _maybe_stop_for_phase_budget(
     limit = max(1, cfg.max_phase_rounds)
     if cfg.phase_agent_rounds < limit:
         return None
-    tp = ctx.wt_path / ctx.rel_task
+    tp = normalize_task_path(cfg.primary, ctx.rel_task)
     if not tp.is_file() or _task_is_complete(cfg.primary, cfg.task_id, tp):
         return None
     return _finalize_review_required(
@@ -637,8 +637,8 @@ def _worktree_fingerprint(wt_path: Path) -> str:
     return out if code == 0 else ""
 
 
-def _progress_snapshot(wt_path: Path, rel_task: str) -> ProgressSnapshot:
-    pending, _done = count_checklist(wt_path / rel_task)
+def _progress_snapshot(primary: Path, wt_path: Path, rel_task: str) -> ProgressSnapshot:
+    pending, _done = count_checklist(normalize_task_path(primary, rel_task))
     code, head, _ = git(wt_path, "rev-parse", "HEAD")
     return ProgressSnapshot(
         pending_count=pending,
@@ -665,10 +665,10 @@ def _run_phase_agent(
         early = _maybe_stop_for_phase_budget(cfg, phase=phase, ctx=phase_budget)
         if early is not None:
             return early
-    before = _progress_snapshot(wt_path, rel_task)
+    before = _progress_snapshot(cfg.primary, wt_path, rel_task)
     model = phase_model_for(phase, plan_model=cfg.plan_model, execute_model=cfg.execute_model)
     rc = cfg._run_agent(wt_path, model, cfg._sub(prompt_name, rel_task, plan_rel), logf, label)
-    after = _progress_snapshot(wt_path, rel_task)
+    after = _progress_snapshot(cfg.primary, wt_path, rel_task)
     if rc != 0:
         classification = cfg.harness.classify_failure(
             FailureContext(
@@ -961,12 +961,13 @@ def run_one_cycle(
         cfg.resume_handoff_pending = bool(cfg.resume_handoff.strip())
         cfg.task_id = (st.task_id or "").strip()
         if not cfg.task_id:
-            tpath = wt_path / rel_task
+            tpath = normalize_task_path(primary, rel_task)
             if tpath.is_file():
-                cfg.task_id = task_id_from_resolved_path((primary / concrete_task_rel(primary, rel_task)).resolve())
+                cfg.task_id = task_id_from_resolved_path(tpath.resolve())
         touch_session_job_folder(primary, cfg.runner_id)
-        oc, dc = count_checklist(wt_path / rel_task)
-        label = task_label(wt_path / rel_task)
+        t_primary = normalize_task_path(primary, rel_task)
+        oc, dc = count_checklist(t_primary)
+        label = task_label(t_primary)
         if cfg.progress != "off":
             banner(f"Resume cycle — {rel_task}")
             task_block(rel_task, label, oc, dc)
@@ -1134,7 +1135,9 @@ def run_one_cycle(
     # IMPLEMENT
     if phase == "IMPLEMENT":
         n = implement_next - 1
-        while n < cfg.implement_rounds_max and (n == 0 or not _task_is_complete(cfg.primary, cfg.task_id, wt_path / rel_task)):
+        while n < cfg.implement_rounds_max and (
+            n == 0 or not _task_is_complete(cfg.primary, cfg.task_id, normalize_task_path(primary, rel_task))
+        ):
             n += 1
             implement_next = n
             _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
@@ -1158,7 +1161,7 @@ def run_one_cycle(
             _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
             if rc == 3:
                 return 3
-        if not _task_is_complete(cfg.primary, cfg.task_id, wt_path / rel_task):
+        if not _task_is_complete(cfg.primary, cfg.task_id, normalize_task_path(primary, rel_task)):
             return 1
         phase = "IMPROVE_REVIEW"
         improve_i = 1
@@ -1801,7 +1804,7 @@ def _maybe_refresh_task_display_name(
     rel_task: str,
     logf: Path,
 ) -> None:
-    tpath = wt_path / rel_task
+    tpath = normalize_task_path(cfg.primary, rel_task)
     if not tpath.is_file():
         return
     text = tpath.read_text(encoding="utf-8", errors="replace")
@@ -1923,7 +1926,7 @@ def _auto_finalize_task_branch(primary: Path, wt: Path, rel_task: str) -> None:
     if not sha_path.is_file():
         return
     base_sha = sha_path.read_text(encoding="utf-8").strip()
-    label = task_label(wt / rel_task)
+    label = task_label(normalize_task_path(primary, rel_task))
     git(wt, "reset", "--soft", base_sha)
     code, out, _ = git(wt, "diff", "--cached", "--quiet")
     if code == 0:

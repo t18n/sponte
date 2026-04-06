@@ -21,6 +21,7 @@ from ralph_focus.task_lifecycle import (
     prepare_task_resume,
     task_cleanup,
 )
+from config.defaults import TASKS_DIR
 from ralph_focus.tasks import task_id_from_resolved_path
 
 
@@ -129,8 +130,9 @@ def test_prepare_task_resume_carries_previous_state_and_clears_old_session(
         lambda *a, **k: None,
     )
     wt = tmp_path / "wt"
-    task_rel = ".sponte/tasks/in-progress/demo.md"
-    task_path = wt / task_rel
+    wt.mkdir()
+    task_rel = f"{TASKS_DIR}/in-progress/demo.md"
+    task_path = tmp_path / task_rel
     task_path.parent.mkdir(parents=True, exist_ok=True)
     task_path.write_text("task: Demo\n\n- [ ] resume\n", encoding="utf-8")
 
