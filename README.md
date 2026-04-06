@@ -81,7 +81,7 @@ The workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) bu
 # Bootstrap Sponte inside the current git workspace
 sponte init
 
-# Create or refine backlog tasks in an initialized workspace
+# Create or refine task markdown in an initialized workspace
 sponte task-plan --workspace /absolute/path/to/workspace
 
 # Inspect resolved `.sponte/settings.json` defaults
@@ -91,11 +91,11 @@ sponte config show --workspace /absolute/path/to/workspace
 sponte agent --workspace /absolute/path/to/workspace --trunk-branch main
 
 # Start an agent cycle for one explicit task
-sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/backlog/example-task.md
+sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/example-task.md
 
 # Token rotation refresh stays in the same Sponte session automatically
 # (no manual `session-resume` needed for the normal threshold handoff)
-sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/backlog/example-task.md --rotate-threshold-tokens 80000
+sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/example-task.md --rotate-threshold-tokens 80000
 
 # Resume the same session (lane)
 sponte session-resume rap-abcd1234 --workspace /absolute/path/to/workspace
@@ -167,7 +167,7 @@ It will:
 5. ensure the local trunk branch exists
 6. pre-fill `commands` in `.sponte/settings.json` when the repo root looks like a single stack (see [Configuration](docs/reference/config.md)); re-running `sponte init` on an existing workspace merges any new detections without overwriting values you already set
 
-After initialization, use `sponte task-plan` to add or refine backlog tasks before starting the first `sponte agent` cycle.
+After initialization, use `sponte task-plan` to add or refine task markdown under `.sponte/tasks/` before starting the first `sponte agent` cycle.
 
 ## Planning Flow
 
@@ -177,8 +177,8 @@ It will:
 
 1. validate that `.sponte/tasks` already exists
 2. prompt for one or more task titles, goals, and verification commands
-3. write task markdown files under `.sponte/tasks/backlog/`
-4. refresh `.sponte/tasks/priorities.md` (human-readable index; `sponte agent --auto` picks from the backlog via the plan model, not this file)
+3. write task markdown files under `.sponte/tasks/`
+4. let `sponte agent --auto` choose among unlocked markdown tasks via the plan model
 
 ## Recovery Flow
 

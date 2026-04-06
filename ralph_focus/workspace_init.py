@@ -23,7 +23,6 @@ from ralph_focus.workspace_settings import (
     save_workspace_settings,
     workspace_settings_path,
 )
-from ralph_focus.tasks import task_has_pending
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
 
 
@@ -125,49 +124,19 @@ def ensure_gitignore_sponte(repo_root: Path, worktree_root: str = WORKTREE_BASE_
         _append_if_missing(normalized_wt, extra_entry)
 
 
-def refresh_priorities_from_backlog(repo: Path) -> None:
-    backlog = repo / TASKS_DIR / "backlog"
-    md_files = sorted({p.resolve() for p in backlog.rglob("*.md")})
-    lines = ["# Priorities", ""]
-    tasks_root = repo / TASKS_DIR
-    for p in md_files:
-        try:
-            rel = p.relative_to(tasks_root).as_posix()
-        except ValueError:
-            continue
-        label = p.stem.replace("-", " ")
-        lines.append(f"- [{label}](./{rel})")
-    lines.append("")
-    pri = tasks_root / "priorities.md"
-    pri.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _ensure_markdown_has_pending_item(path: Path) -> None:
-    if not path.is_file() or task_has_pending(path):
-        return
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if text and not text.endswith("\n"):
-        text += "\n"
-    text += "\n## Sponte\n\n- [ ] Complete this task\n"
-    path.write_text(text, encoding="utf-8")
-
-
 def import_tasks_from_source(source: Path, repo: Path) -> None:
-    """Copy markdown tasks from a file or directory into ``.sponte/tasks/backlog``."""
+    """Copy markdown tasks from a file or directory into ``.sponte/tasks/``."""
     dest_root = repo / TASKS_DIR
-    backlog = dest_root / "backlog"
-    backlog.mkdir(parents=True, exist_ok=True)
+    dest_root.mkdir(parents=True, exist_ok=True)
     if source.is_file():
-        shutil.copy2(source, backlog / source.name)
-        _ensure_markdown_has_pending_item(backlog / source.name)
+        shutil.copy2(source, dest_root / source.name)
         return
     if source.is_dir():
         for p in sorted(source.rglob("*.md")):
             rel = p.relative_to(source)
-            dest = backlog / rel
+            dest = dest_root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dest)
-            _ensure_markdown_has_pending_item(dest)
         return
     raise FileNotFoundError(f"source not found: {source}")
 
@@ -185,8 +154,7 @@ def init_sponte_workspace(
 
     sponte = repo_root / SPONTE_DIR
     sponte.mkdir(parents=True, exist_ok=True)
-    for stage in ("backlog", "in-progress", "review-required", "completed"):
-        (repo_root / TASKS_DIR / stage).mkdir(parents=True, exist_ok=True)
+    (repo_root / TASKS_DIR).mkdir(parents=True, exist_ok=True)
     if trunk_branch is not None and trunk_branch.strip():
         validated = trunk_branch_ref(repo_root, trunk_name=trunk_branch.strip())
         settings = replace(settings, trunk_branch=validated)
@@ -229,6 +197,5 @@ __all__ = [
     "ensure_gitignore_sponte",
     "import_tasks_from_source",
     "init_sponte_workspace",
-    "refresh_priorities_from_backlog",
     "refresh_workspace_commands",
 ]

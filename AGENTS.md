@@ -22,7 +22,7 @@
 - Token rotation should refresh agent chat context inside the same Sponte session/loop; routine rotation should not require or suggest `sponte session-resume`.
 - Workspace `.sponte/settings.json` supports lifecycle `commands` (`install`, `dev`, `check`, `build`, `test`, `verify`); `sponte init` auto-detects defaults and docs position them as a token saver.
 - `sponte init` should add `.sponte/` to `.gitignore` before other init work; if `worktree_root` is outside `.sponte/`, ignore that path too.
-- `agent --auto` should choose tasks via the plan model with lock-aware backlog selection instead of relying on `priorities.md`.
+- `agent --auto` should choose among unlocked markdown files anywhere under `.sponte/tasks/`; do not rely on `priorities.md` or staged task folders.
 - `sponte agent` uses `--task`, `--resume-session`, and `--resume-task`; `--auto` requires an initialized task store and otherwise should point users to `sponte task-plan`.
 - App state for `session-resume` is keyed by resolved workspace root; use the same checkout path and `--workspace` convention as the original `sponte agent` run or resume files may be missing even when the CLI printed a resume hint.
 - Task `task_id` is path-derived (`t-` + hex); legacy title-based job folders can be renamed with `sponte task-cleanup --migrate-task-ids` when the task file still exists at `rel_task`. `cleanup_pending` defers pruning `.sponte/jobs/tasks/<task_id>/` after completion; `task-cleanup` retries that prune when the task file is gone.

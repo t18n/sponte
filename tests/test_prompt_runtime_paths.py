@@ -59,6 +59,27 @@ def test_rendered_active_prompts_mention_workspace_instruction_files(tmp_path: P
         assert "CLAUDE.md" in rendered
 
 
+def test_render_prompt_injects_task_status_file_for_implement(tmp_path: Path) -> None:
+    from ralph_focus.prompts import render_prompt
+    from ralph_focus.tasks import task_id_from_resolved_path
+
+    task_path = tmp_path / TASKS_DIR / "example.md"
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text("# Example\n", encoding="utf-8")
+    task_id = task_id_from_resolved_path(task_path.resolve())
+
+    rendered = render_prompt(
+        "implement",
+        primary=tmp_path,
+        task_rel=f"{TASKS_DIR}/example.md",
+        plan_rel="/tmp/plan.md",
+        task_id=task_id,
+    )
+
+    assert f".sponte/jobs/tasks/{task_id}/status.json" in rendered
+    assert "__TASK_STATUS_FILE__" not in rendered
+
+
 def test_render_prompt_resolves_workspace_prompt_override(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "state"))
     from ralph_focus.prompts import render_prompt, resolve_prompt_template_path

@@ -83,8 +83,6 @@ from ralph_focus.task_lifecycle import (
 )
 from ralph_focus.tasks import (
     count_checklist,
-    priority_task_paths_pending,
-    priorities_file,
     task_id_from_resolved_path,
     task_label,
     task_root,
@@ -344,7 +342,7 @@ def _print_auto_focus_settings(
             t.add_row("Session ends (UTC)", session_deadline_epoch)
     t.add_row("Cleanup worktree on interrupt", "yes" if cleanup_on_exit else "no")
     t.add_row("Allow agent task pick", "yes" if allow_agent_pick else "no")
-    t.add_row("Explicit task", task_arg if task_arg else "(plan-model backlog pick)")
+    t.add_row("Explicit task", task_arg if task_arg else "(plan-model task pick)")
     t.add_row("Resuming prior cycle", "yes" if resuming else "no")
     if resume_task_recovery_mode:
         t.add_row("Task-scoped recovery", "single cycle then exit")
@@ -375,16 +373,18 @@ def _prompt_required(label: str, *, default: str | None = None) -> str:
 
 
 def _backlog_task_paths(primary: Path) -> list[Path]:
-    return sorted((primary / TASKS_DIR / "backlog").rglob("*.md"))
+    from ralph_focus.tasks import iter_sponte_task_markdown_files
+
+    return iter_sponte_task_markdown_files(primary)
 
 
 def _pick_existing_backlog_task(primary: Path) -> Path | None:
     pending = _backlog_task_paths(primary)
     if not pending:
-        console.print("[yellow]No backlog tasks to refine yet; creating a new one.[/yellow]")
+        console.print("[yellow]No task files to refine yet; creating a new one.[/yellow]")
         return None
     choice_paths = task_list_choice_paths(primary, pending)
-    table = Table(title="Backlog tasks")
+    table = Table(title="Task files")
     table.add_column("#")
     table.add_column("Task")
     for idx, rel_path in enumerate(choice_paths, 1):
@@ -402,11 +402,22 @@ def _pick_existing_backlog_task(primary: Path) -> Path | None:
 def _existing_task_defaults(task_path: Path, *, default_test_command: str) -> tuple[str, str, str]:
     text = task_path.read_text(encoding="utf-8", errors="replace")
     title_match = re.search(r"^task:\s*(.+)$", text, flags=re.MULTILINE)
+    h1_match = re.search(r"^#\s+(.+)$", text, flags=re.MULTILINE)
     command_match = re.search(r"^test_command:\s*(.+)$", text, flags=re.MULTILINE)
-    goal_match = re.search(r"(?ms)^# Goal\s+(.*?)(?:^## |\Z)", text)
-    title = title_match.group(1).strip() if title_match else task_path.stem.replace("-", " ")
+    goal_match = re.search(r"(?ms)^##? Goal\s+(.*?)(?:^## |\Z)", text)
+    verification_match = re.search(r"(?ms)^## Verification\s+(.*?)(?:^## |\Z)", text)
+    title = (
+        title_match.group(1).strip()
+        if title_match
+        else (h1_match.group(1).strip() if h1_match else task_path.stem.replace("-", " "))
+    )
     goal = goal_match.group(1).strip() if goal_match else ""
-    test_command = command_match.group(1).strip() if command_match else default_test_command
+    if command_match:
+        test_command = command_match.group(1).strip()
+    elif verification_match:
+        test_command = verification_match.group(1).strip()
+    else:
+        test_command = default_test_command
     return title, goal, test_command
 
 
@@ -417,36 +428,33 @@ def _slugify_task_title(title: str) -> str:
 
 def _next_task_path(primary: Path, title: str) -> Path:
     slug = _slugify_task_title(title)
-    backlog = primary / TASKS_DIR / "backlog"
-    candidate = backlog / f"{slug}.md"
+    tasks_root = primary / TASKS_DIR
+    candidate = tasks_root / f"{slug}.md"
     idx = 2
     while candidate.exists():
-        candidate = backlog / f"{slug}-{idx}.md"
+        candidate = tasks_root / f"{slug}-{idx}.md"
         idx += 1
     return candidate
 
 
 def _task_markdown(*, title: str, goal: str, test_command: str) -> str:
     return (
-        f"task: {title}\n"
-        f"test_command: {test_command}\n\n"
-        "# Goal\n\n"
+        f"# {title}\n\n"
+        "## Goal\n\n"
         f"{goal}\n\n"
-        "## Checklist\n\n"
-        "- [ ] Write a concrete implementation plan\n"
-        "- [ ] Implement the requested change\n"
-        f"- [ ] Run `{test_command}`\n"
+        "## Verification\n\n"
+        f"{test_command}\n"
     )
 
 
 def _plan_tasks_interactively(primary: Path) -> list[Path]:
     created: list[Path] = []
-    backlog = primary / TASKS_DIR / "backlog"
-    backlog.mkdir(parents=True, exist_ok=True)
+    tasks_root = primary / TASKS_DIR
+    tasks_root.mkdir(parents=True, exist_ok=True)
     default_test = resolved_default_test_command(primary)
     while True:
         existing_task: Path | None = None
-        if _backlog_task_paths(primary) and Confirm.ask("Refine an existing backlog task?", default=False):
+        if _backlog_task_paths(primary) and Confirm.ask("Refine an existing task file?", default=False):
             existing_task = _pick_existing_backlog_task(primary)
         if existing_task is not None:
             title_default, goal_default, test_command_default = _existing_task_defaults(
@@ -1177,7 +1185,7 @@ def cmd_task_resume(
     _invoke_agent_minimal(workspace=workspace, resume_session=new_sid)
 
 
-@app.command("task-cancel", help="Abandon active task: remove worktree, clear locks, return task to backlog.")
+@app.command("task-cancel", help="Abandon active task: remove worktree and clear task/session locks.")
 def cmd_task_cancel(
     task_id: Annotated[str, typer.Argument(metavar="TASK_ID")],
     workspace: Annotated[
@@ -1255,7 +1263,7 @@ def cmd_status(
         Panel(
             f"Active sessions (job index): {active_sessions}\n"
             f"Claimed tasks: {active_tasks}\n"
-            f"Backlog tasks: {backlog_n}\n\n"
+            f"Task files: {backlog_n}\n\n"
             "Try: sponte session-current | sponte task-list | sponte agent …",
             title="Sponte status",
             border_style="cyan",
@@ -1319,22 +1327,7 @@ def cmd_task_list(
         console.print(p.relative_to(primary).as_posix())
 
 
-@app.command("task-priority", help="Show priorities.md pending links and resolved task_id when possible.")
-def cmd_task_priority(
-    workspace: Annotated[
-        Path | None,
-        typer.Option("--workspace", "-w", help="Git checkout root"),
-    ] = None,
-) -> None:
-    primary = _cli_primary(workspace)
-    pri = priorities_file(primary)
-    console.print(f"[dim]{pri.relative_to(primary)}[/dim]")
-    for p in priority_task_paths_pending(pri, primary):
-        tid = task_id_from_resolved_path(p)
-        console.print(f"  {p.relative_to(primary).as_posix()}  [cyan]{tid}[/cyan]")
-
-
-@app.command("task-current", help="Tasks with an owning session in .sponte/jobs/tasks/.")
+@app.command("task-current", help="Claimed tasks from the flat task lock registry.")
 def cmd_task_current(
     workspace: Annotated[
         Path | None,
@@ -1344,8 +1337,9 @@ def cmd_task_current(
     primary = _cli_primary(workspace)
     t = Table(title="Claimed tasks")
     t.add_column("task_id")
+    t.add_column("lock_path")
     t.add_column("session")
-    t.add_column("stage")
+    t.add_column("display_name")
     t.add_column("worktree")
     for p in iter_task_status_files(primary):
         try:
@@ -1357,10 +1351,18 @@ def cmd_task_current(
         owner = str(raw.get("owning_session_id", "")).strip()
         if not owner:
             continue
+        rel_task = str(raw.get("rel_task", "")).strip()
+        lock_path = ""
+        if rel_task:
+            try:
+                lock_path = (primary / rel_task).resolve().as_posix()
+            except OSError:
+                lock_path = str(primary / rel_task)
         t.add_row(
             str(raw.get("task_id", "")),
+            lock_path,
             owner,
-            str(raw.get("stage", "")),
+            str(raw.get("display_name", "")) or str(raw.get("task_title", "")),
             str(raw.get("worktree_path", "")),
         )
     console.print(t)
@@ -1536,7 +1538,7 @@ def cmd_config_show(
 app.add_typer(config_typer, name="config")
 
 
-@app.command("task-plan", help="Turn backlog notes into `.sponte/tasks/` markdown files interactively.")
+@app.command("task-plan", help="Create or refine `.sponte/tasks/` markdown files interactively.")
 def cmd_task_plan(
     workspace: Annotated[
         Path | None,

@@ -12,9 +12,8 @@ def test_sponte_tasks_layout_valid_without_priorities_md(tmp_path: Path) -> None
 
 
 def test_task_path_helpers_build_workspace_paths(tmp_path: Path) -> None:
-    from ralph_focus.tasks import priorities_file, task_file_path, task_rel_path
+    from ralph_focus.tasks import task_file_path, task_rel_path
 
-    assert priorities_file(tmp_path) == tmp_path / TASKS_DIR / "priorities.md"
     assert task_rel_path("backlog", "demo.md") == f"{TASKS_DIR}/backlog/demo.md"
     assert task_file_path(tmp_path, "completed", "demo.md") == tmp_path / TASKS_DIR / "completed" / "demo.md"
 
@@ -46,19 +45,6 @@ def test_normalize_task_path_falls_back_to_existing_legacy_task_file(tmp_path: P
     assert normalize_task_path(tmp_path, "backlog/demo.md") == legacy_task
 
 
-def test_priority_task_paths_pending_falls_back_to_legacy_layout(tmp_path: Path) -> None:
-    from ralph_focus.tasks import priorities_file, priority_task_paths_pending
-
-    legacy_task = tmp_path / LEGACY_TASKS_DIR / "backlog" / "demo.md"
-    legacy_task.parent.mkdir(parents=True, exist_ok=True)
-    legacy_task.write_text("- [ ] legacy\n", encoding="utf-8")
-    legacy_priorities = tmp_path / LEGACY_TASKS_DIR / "priorities.md"
-    legacy_priorities.parent.mkdir(parents=True, exist_ok=True)
-    legacy_priorities.write_text("- [Demo](./backlog/demo.md)\n", encoding="utf-8")
-
-    assert priority_task_paths_pending(priorities_file(tmp_path), tmp_path) == [legacy_task]
-
-
 def test_compute_task_id_uses_title_slug_and_title_hash() -> None:
     from ralph_focus.tasks import compute_task_id, task_title_hash_suffix
 
@@ -66,6 +52,30 @@ def test_compute_task_id_uses_title_slug_and_title_hash() -> None:
     assert tid.startswith("add-oauth-login-")
     assert len(tid.split("-")[-1]) == 6
     assert task_title_hash_suffix("Add OAuth login") == tid.rsplit("-", 1)[-1]
+
+
+def test_pending_selectable_task_paths_include_any_markdown_not_locked(tmp_path: Path) -> None:
+    from ralph_focus.tasks import pending_selectable_task_paths
+    from ralph_focus.tasks_lock_registry import tasks_lock_append
+
+    task_a = tmp_path / TASKS_DIR / "alpha.md"
+    task_b = tmp_path / TASKS_DIR / "nested" / "beta.md"
+    ignored_tmp = tmp_path / TASKS_DIR / "_tmp" / "helper.md"
+    ignored_artifact = tmp_path / TASKS_DIR / "artifacts" / "old.md"
+
+    task_a.parent.mkdir(parents=True, exist_ok=True)
+    task_b.parent.mkdir(parents=True, exist_ok=True)
+    ignored_tmp.parent.mkdir(parents=True, exist_ok=True)
+    ignored_artifact.parent.mkdir(parents=True, exist_ok=True)
+
+    task_a.write_text("# Alpha\n\nNo checklist.\n", encoding="utf-8")
+    task_b.write_text("# Beta\n\nNested task.\n", encoding="utf-8")
+    ignored_tmp.write_text("# temp\n", encoding="utf-8")
+    ignored_artifact.write_text("# artifact\n", encoding="utf-8")
+
+    tasks_lock_append(tmp_path, task_b)
+
+    assert pending_selectable_task_paths(tmp_path) == [task_a]
 
 
 def test_sponte_job_paths_under_workspace(tmp_path: Path) -> None:

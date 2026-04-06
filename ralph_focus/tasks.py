@@ -1,4 +1,4 @@
-"""Task files, priorities, checklist helpers."""
+"""Task file helpers for the flat `.sponte/tasks/` store."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ _TASK_PATH_SKIP_PARTS = frozenset({"_tmp", "artifacts"})
 
 _PENDING = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[[\s]\]", re.MULTILINE)
 _DONE = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[x\]", re.MULTILINE)
-_PRIORITY_LINK = re.compile(r"\]\(\./(backlog|in-progress)/([^)]+\.md)\)")
 _TASK_LINE = re.compile(r"^task:\s*(.+)$", re.MULTILINE)
+_H1_LINE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,6 @@ class TaskSnapshot:
 
 
 _TASK_CACHE: dict[Path, tuple[tuple[int, int], TaskSnapshot]] = {}
-_PRIORITIES_CACHE: dict[Path, tuple[tuple[int, int], list[Path]]] = {}
 
 
 def _mtime_key(path: Path) -> tuple[int, int]:
@@ -38,7 +37,6 @@ def _mtime_key(path: Path) -> tuple[int, int]:
 
 def clear_task_cache() -> None:
     _TASK_CACHE.clear()
-    _PRIORITIES_CACHE.clear()
 
 
 def task_rel_path(stage: str, name: str) -> str:
@@ -51,14 +49,6 @@ def task_file_path(repo: Path, stage: str, name: str) -> Path:
 
 def legacy_task_file_path(repo: Path, stage: str, name: str) -> Path:
     return repo / LEGACY_TASKS_DIR / stage / name
-
-
-def priorities_file(repo: Path, filename: str = "priorities.md") -> Path:
-    current = repo / TASKS_DIR / filename
-    legacy = repo / LEGACY_TASKS_DIR / filename
-    if current.exists() or not legacy.exists():
-        return current
-    return legacy
 
 
 def task_root(repo: Path) -> str:
@@ -123,7 +113,12 @@ def task_snapshot(path: Path) -> TaskSnapshot:
         label = m.group(1).strip().strip('"').strip("'")
         label = label[:200] if label else path.stem.replace("-", " ")
     else:
-        label = path.stem.replace("-", " ")
+        h1 = _H1_LINE.search(text)
+        if h1:
+            label = h1.group(1).strip().strip('"').strip("'")
+            label = label[:200] if label else path.stem.replace("-", " ")
+        else:
+            label = path.stem.replace("-", " ")
     snap = TaskSnapshot(
         text=text,
         pending=len(_PENDING.findall(text)),
@@ -141,38 +136,6 @@ def count_checklist(path: Path) -> tuple[int, int]:
 
 def task_has_pending(path: Path) -> bool:
     return task_snapshot(path).pending > 0
-
-
-def priority_task_paths(priorities_file: Path, repo: Path) -> list[Path]:
-    if not priorities_file.is_file():
-        return []
-    key = _mtime_key(priorities_file)
-    cached = _PRIORITIES_CACHE.get(priorities_file)
-    if cached and cached[0] == key:
-        return cached[1]
-    text = priorities_file.read_text(encoding="utf-8", errors="replace")
-    out: list[Path] = []
-    for m in _PRIORITY_LINK.finditer(text):
-        rel = f"{m.group(1)}/{m.group(2)}"
-        out.append(normalize_task_path(repo, rel))
-    _PRIORITIES_CACHE[priorities_file] = (key, out)
-    return out
-
-
-def select_task_from_priorities(priorities_file: Path, repo: Path) -> Path | None:
-    for p in priority_task_paths(priorities_file, repo):
-        if p.is_file() and task_has_pending(p):
-            return p
-    return None
-
-
-def priority_task_paths_pending(priorities_file: Path, repo: Path) -> list[Path]:
-    """All priority-linked tasks that exist and still have pending checklist items."""
-    out: list[Path] = []
-    for p in priority_task_paths(priorities_file, repo):
-        if p.is_file() and task_has_pending(p):
-            out.append(p)
-    return out
 
 
 def task_label(path: Path) -> str:
@@ -266,14 +229,12 @@ def iter_sponte_task_markdown_files(repo: Path) -> list[Path]:
 
 
 def pending_selectable_task_paths(repo: Path) -> list[Path]:
-    """Markdown tasks that are eligible for auto/claim selection (pending checklist, not path-locked)."""
+    """Markdown tasks eligible for auto/claim selection (any task markdown, not path-locked)."""
     from ralph_focus.tasks_lock_registry import read_tasks_lock_paths
 
     locked = read_tasks_lock_paths(repo)
     out: list[Path] = []
     for p in iter_sponte_task_markdown_files(repo):
-        if not task_has_pending(p):
-            continue
         try:
             if p.resolve() in locked:
                 continue
@@ -284,16 +245,16 @@ def pending_selectable_task_paths(repo: Path) -> list[Path]:
 
 
 def pending_backlog_task_paths(repo: Path) -> list[Path]:
-    """Pending tasks anywhere under ``.sponte/tasks/`` (excluding reserved subtrees)."""
+    """Selectable markdown tasks anywhere under ``.sponte/tasks/`` (excluding reserved subtrees)."""
     return pending_selectable_task_paths(repo)
 
 
 def format_pending_backlog_for_prompt(repo: Path) -> str:
-    """Markdown bullet list of pending selectable tasks under the task store (for ``--auto`` pick)."""
+    """Markdown bullet list of selectable tasks under the task store (for ``--auto`` pick)."""
     lines: list[str] = []
     for p in pending_selectable_task_paths(repo):
         rel = p.relative_to(repo).as_posix()
         lines.append(f"- `{rel}` — {task_label(p)}")
     if not lines:
-        return "_(No pending selectable tasks.)_"
+        return "_(No selectable tasks.)_"
     return "\n".join(lines)

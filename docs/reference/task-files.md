@@ -2,21 +2,22 @@
 
 ## Layout
 
-Tasks are markdown files under `.sponte/tasks/<stage>/`. The **filename stem** is part of identity; the **title** inside the file (first heading or front matter as implemented in `task_label`) feeds the hash.
+Tasks are markdown files anywhere under `.sponte/tasks/`. Nested folders are allowed. Reserved subtrees such as `.sponte/tasks/_tmp/` and `.sponte/tasks/artifacts/` are not treated as tasks.
 
 ## `task_id` format
 
 ```
-<slugified-task-name>-<6charhash(task-title)>
+t-<16hex(path-hash)>
 ```
 
-- **Slugified name** comes from the file stem.
-- **Six-character hash** is derived from the **task title only** (not the body). Changing the title changes `task_id`.
+- `task_id` is derived from the task file's resolved absolute path.
+- Renaming or moving the task file changes `task_id`.
+- The human-facing label comes from AI naming or the markdown title; `task_id` stays machine-oriented.
 
-Use `sponte task-priority` to see `priorities.md` links with resolved ids (optional index).
+## Selection
 
-**Auto selection:** `sponte agent --auto` chooses among pending **backlog** tasks using the workspace **plan model** and the `agent_pick_task` prompt (override with `prompts.agent_pick_task` in `.sponte/settings.json`). It considers claimed tasks in `.sponte/jobs/tasks/` so parallel sessions can steer away from in-flight work.
+`sponte agent --auto` chooses among unlocked markdown task files under `.sponte/tasks/` using the workspace plan model and `prompts.agent_pick_task`. `tasks.lock` is the claim gate; `task-current` shows the current absolute lock paths and owners.
 
-## Checklist
+## Content
 
-Sponte uses checklist items in the markdown to decide whether work is still **pending** for `review-required` and similar logic. Keep checklists explicit so phases and policy behave predictably.
+Task markdown does not need frontmatter, stage folders, or checklist syntax. A first `# Heading` is enough for a readable default label, but even that is optional.

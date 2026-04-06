@@ -662,6 +662,85 @@ def test_auto_focus_resume_task_ignores_expired_saved_deadline(monkeypatch, tmp_
     assert seen == [True]
 
 
+def test_session_resume_reports_load_failure_reason(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda *_a, **_k: (None, ResumeLoadFailureReason.primary_mismatch),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["session-resume", "rap-test1234"])
+
+    assert result.exit_code == 1
+    assert "Nothing to resume" in _output(result)
+    assert "primary_mismatch" in _output(result)
+
+
+def test_auto_focus_prints_non_resume_hint_when_resume_missing(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+    from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
+
+    class _Harness:
+        id = "cursor"
+        display_name = "Cursor"
+        capabilities = HarnessCapabilities()
+
+        def availability(self) -> AvailabilityReport:
+            return AvailabilityReport(available=True)
+
+        def prepare(self, request: RunRequest) -> RunRequest:
+            return request
+
+        def run(self, request: RunRequest) -> RunResult:
+            return RunResult(exit_code=0, usage={})
+
+    def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
+        cfg.current_wt_path = tmp_path / ".sponte" / "worktrees" / "example"
+        cfg.current_wt_path.mkdir(parents=True, exist_ok=True)
+        return 0
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
+    monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "run_preflight", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda *_a, **_k: (None, ResumeLoadFailureReason.missing_file),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "agent",
+            "--once",
+            "--skip-preflight",
+            "--task",
+            str(tmp_path / TASKS_DIR / "backlog" / "example.md"),
+            "--agent",
+            "cursor",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Worktree left for inspection" in _output(result)
+    assert "Session resume file is missing or invalid" in _output(result)
+    assert "task-resume <task_id>" in _output(result)
+    assert "sponte session-resume rap-test1234" not in _output(result)
+
+
 def test_auto_focus_resume_task_rejects_combine_resume_session(monkeypatch, tmp_path: Path) -> None:
     from ralph_focus import cli
 
@@ -715,7 +794,7 @@ def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: 
             session_id="rap-1111",
             workspace_root=str(tmp_path.resolve()),
             active_task_id="demo-abc123",
-            rel_task=f"{TASKS_DIR}/in-progress/demo.md",
+            rel_task=f"{TASKS_DIR}/demo.md",
             phase="IMPLEMENT",
             worktree_path=str(tmp_path / "wt-demo"),
             branch="ralph/wt-demo",
@@ -725,7 +804,7 @@ def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: 
         tmp_path,
         TaskJobStatus(
             task_id="demo-abc123",
-            rel_task=f"{TASKS_DIR}/in-progress/demo.md",
+            rel_task=f"{TASKS_DIR}/demo.md",
             stage="in-progress",
             owning_session_id="rap-1111",
             worktree_path=str(tmp_path / "wt-demo"),
@@ -733,9 +812,9 @@ def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: 
             task_title="Demo task",
         ),
     )
-    backlog = tmp_path / TASKS_DIR / "backlog"
-    backlog.mkdir(parents=True, exist_ok=True)
-    (backlog / "queued.md").write_text("task: queued\n\n- [ ] next\n", encoding="utf-8")
+    tasks_root = tmp_path / TASKS_DIR
+    tasks_root.mkdir(parents=True, exist_ok=True)
+    (tasks_root / "queued.md").write_text("task: queued\n\n- [ ] next\n", encoding="utf-8")
 
     runner = CliRunner()
     status_result = runner.invoke(cli.app, ["status"])
@@ -747,13 +826,14 @@ def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: 
     assert status_result.exit_code == 0
     assert "Active sessions (job index): 1" in _output(status_result)
     assert "Claimed tasks: 1" in _output(status_result)
-    assert "Backlog tasks: 1" in _output(status_result)
+    assert "Task files: 1" in _output(status_result)
     assert session_current_result.exit_code == 0
     assert "rap-1111" in _output(session_current_result)
     assert "demo-abc123" in _output(session_current_result)
     assert task_current_result.exit_code == 0
     assert "demo-abc123" in _output(task_current_result)
     assert "rap-1111" in _output(task_current_result)
+    assert "Demo task" in _output(task_current_result)
     assert session_show_result.exit_code == 0
     assert "active_task_id" in _output(session_show_result)
     assert "demo-abc123" in _output(session_show_result)

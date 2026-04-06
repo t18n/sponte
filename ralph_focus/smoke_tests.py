@@ -45,9 +45,7 @@ from ralph_focus.token_rotation import TokenRotationPolicy
 from ralph_focus.tasks import (
     clear_task_cache,
     normalize_task_path,
-    priority_task_paths,
-    priority_task_paths_pending,
-    select_task_from_priorities,
+    pending_selectable_task_paths,
     task_has_pending,
     task_snapshot,
 )
@@ -280,29 +278,17 @@ def _test_merge_lock_path_and_lockfile() -> None:
 def _test_tasks_helpers() -> None:
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
-        (root / TASKS_DIR / "backlog").mkdir(parents=True)
-        f = root / TASKS_DIR / "backlog" / "t.md"
+        (root / TASKS_DIR).mkdir(parents=True)
+        f = root / TASKS_DIR / "t.md"
         f.write_text("- [ ] a\n", encoding="utf-8")
         clear_task_cache()
         assert task_has_pending(f)
         snap = task_snapshot(f)
         assert snap.pending == 1
-        assert normalize_task_path(root, f"{TASKS_DIR}/backlog/t.md") == f
-        assert normalize_task_path(root, ".tasks/backlog/t.md") == f
-        pri = root / TASKS_DIR / "priorities.md"
-        pri.write_text("1. [x](./backlog/t.md)\n", encoding="utf-8")
-        paths = priority_task_paths(pri, root)
-        assert paths and paths[0] == f
-        assert select_task_from_priorities(pri, root) == f
-        assert priority_task_paths_pending(pri, root) == [f]
-        b = root / TASKS_DIR / "backlog" / "b.md"
+        assert normalize_task_path(root, f"{TASKS_DIR}/t.md") == f
+        b = root / TASKS_DIR / "b.md"
         b.write_text("- [ ] b\n", encoding="utf-8")
-        pri2 = root / TASKS_DIR / "priorities2.md"
-        pri2.write_text(
-            "- [a](./backlog/t.md)\n- [b](./backlog/b.md)\n",
-            encoding="utf-8",
-        )
-        pend = priority_task_paths_pending(pri2, root)
+        pend = pending_selectable_task_paths(root)
         assert f in pend and b in pend
         f.write_text('task: "renamed"\n- [x] a\n', encoding="utf-8")
         snap2 = task_snapshot(f)
@@ -385,10 +371,10 @@ def _test_contracts_boundary() -> None:
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         task_store = FileTaskStore()
-        task = root / TASKS_DIR / "backlog" / "contract-smoke.md"
+        task = root / TASKS_DIR / "contract-smoke.md"
         task.parent.mkdir(parents=True, exist_ok=True)
         task.write_text("- [ ] boundary\n", encoding="utf-8")
-        assert task_store.resolve_task(root, "backlog/contract-smoke.md") == task
+        assert task_store.resolve_task(root, "contract-smoke.md") == task
         assert task_store.has_pending(task) is True
 
         run_state = FileSystemRunStateStore(root)

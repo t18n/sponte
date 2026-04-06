@@ -8,7 +8,7 @@ You are choosing **one** task for this Sponte session. Use the **plan model** re
 
 __CLAIMED_TASKS__
 
-**Pending selectable candidates** (each path must still exist under `__TASKS_ROOT__/` and have open checklist items; paths may be in a `backlog/` subfolder or at the root of the task store):
+**Selectable candidates** (each path must still exist under `__TASKS_ROOT__/`; candidates may live at the task-store root or in nested folders):
 
 __BACKLOG_CANDIDATES__
 
@@ -29,4 +29,4 @@ Write **only** the single repo-relative path of the chosen task (one line, no ma
 The path must:
 - exist on disk,
 - stay under `__TASKS_ROOT__/` (repo-relative),
-- correspond to a task file that still has **pending** checklist items.
+- correspond to a task markdown file that is not currently locked.

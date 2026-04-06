@@ -201,7 +201,9 @@ def test_init_sponte_adds_gitignore_and_tasks(tmp_path: Path) -> None:
     assert ".sponte/" in gi
     assert ".sponte/worktrees/" not in gi
     assert sponte_tasks_layout_valid(root)
-    assert (root / TASKS_DIR / "backlog" / "seed.md").is_file()
+    imported = root / TASKS_DIR / "seed.md"
+    assert imported.is_file()
+    assert imported.read_text(encoding="utf-8") == "task: Seed\n\n- [ ] one\n"
 
 
 def test_ensure_gitignore_sponte_adds_external_worktree_root(tmp_path: Path) -> None:
@@ -227,7 +229,7 @@ def test_init_sponte_allows_empty_task_store(tmp_path: Path) -> None:
     init_sponte_workspace(root, source=None, trunk_branch="sponte")
 
     assert sponte_tasks_layout_valid(root)
-    assert (root / TASKS_DIR / "backlog").is_dir()
+    assert (root / TASKS_DIR).is_dir()
     assert worktrees_base(root).is_dir()
 
 
@@ -371,7 +373,7 @@ def test_init_cli_initializes_workspace_without_running_cycle(monkeypatch: pytes
 
     assert result.exit_code == 0
     assert seen["run_one_cycle"] == 0
-    assert (root / TASKS_DIR / "backlog").is_dir()
+    assert (root / TASKS_DIR).is_dir()
 
 
 def test_init_cli_refreshes_commands_when_already_initialized(
@@ -428,11 +430,12 @@ def test_plan_cli_creates_task_for_initialized_workspace(
     result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
 
     assert result.exit_code == 0
-    created = root / TASKS_DIR / "backlog" / "cli-init-redesign.md"
+    created = root / TASKS_DIR / "cli-init-redesign.md"
     assert created.is_file()
     text = created.read_text(encoding="utf-8")
-    assert "task: CLI init redesign" in text
-    assert "test_command: uv run pytest -q" in text
+    assert "# CLI init redesign" in text
+    assert "## Verification" in text
+    assert "uv run pytest -q" in text
 
 
 def test_plan_cli_uses_workspace_default_test_command(
@@ -475,9 +478,9 @@ def test_plan_cli_uses_workspace_default_test_command(
     result = runner.invoke(cli.app, ["task-plan", "--workspace", str(root)])
 
     assert result.exit_code == 0
-    created = root / TASKS_DIR / "backlog" / "scoped-feature.md"
+    created = root / TASKS_DIR / "scoped-feature.md"
     assert created.is_file()
-    assert "test_command: pnpm run test" in created.read_text(encoding="utf-8")
+    assert "pnpm run test" in created.read_text(encoding="utf-8")
 
 
 def test_plan_cli_can_refine_existing_backlog_task(
@@ -491,14 +494,13 @@ def test_plan_cli_can_refine_existing_backlog_task(
     root.mkdir()
     _git_init_with_commit(root)
     init_sponte_workspace(root, source=None, trunk_branch="sponte")
-    task_path = root / TASKS_DIR / "backlog" / "existing.md"
+    task_path = root / TASKS_DIR / "existing.md"
     task_path.write_text(
-        "task: Existing task\n"
-        "test_command: uv run pytest -q\n\n"
-        "# Goal\n\n"
+        "# Existing task\n\n"
+        "## Goal\n\n"
         "Original goal.\n\n"
-        "## Checklist\n\n"
-        "- [ ] Original step\n",
+        "## Verification\n\n"
+        "uv run pytest -q\n",
         encoding="utf-8",
     )
 
@@ -525,9 +527,9 @@ def test_plan_cli_can_refine_existing_backlog_task(
 
     assert result.exit_code == 0
     text = task_path.read_text(encoding="utf-8")
-    assert "task: Existing task refined" in text
+    assert "# Existing task refined" in text
     assert "Refined goal." in text
-    assert "test_command: uv run pytest tests/test_workspace_slice.py -q" in text
+    assert "uv run pytest tests/test_workspace_slice.py -q" in text
 
 
 def test_plan_cli_can_refine_nested_backlog_task(
@@ -541,15 +543,14 @@ def test_plan_cli_can_refine_nested_backlog_task(
     root.mkdir()
     _git_init_with_commit(root)
     init_sponte_workspace(root, source=None, trunk_branch="sponte")
-    task_path = root / TASKS_DIR / "backlog" / "nested" / "existing.md"
+    task_path = root / TASKS_DIR / "nested" / "existing.md"
     task_path.parent.mkdir(parents=True, exist_ok=True)
     task_path.write_text(
-        "task: Nested existing task\n"
-        "test_command: uv run pytest -q\n\n"
-        "# Goal\n\n"
+        "# Nested existing task\n\n"
+        "## Goal\n\n"
         "Original nested goal.\n\n"
-        "## Checklist\n\n"
-        "- [ ] Original nested step\n",
+        "## Verification\n\n"
+        "uv run pytest -q\n",
         encoding="utf-8",
     )
 
@@ -572,7 +573,7 @@ def test_plan_cli_can_refine_nested_backlog_task(
 
     assert result.exit_code == 0
     text = task_path.read_text(encoding="utf-8")
-    assert "task: Nested existing task refined" in text
+    assert "# Nested existing task refined" in text
     assert "Refined nested goal." in text
 
 

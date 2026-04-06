@@ -358,6 +358,26 @@ def test_claim_task_on_primary_appends_tasks_lock(monkeypatch: pytest.MonkeyPatc
     assert legacy_src.resolve() in locked
 
 
+def test_task_completion_prefers_status_flag_over_checklist(tmp_path: Path) -> None:
+    from ralph_focus import cycle
+    from ralph_focus.task_jobs import TaskJobStatus, write_task_job_status
+
+    task_path = tmp_path / TASKS_DIR / "example.md"
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text("task: Example\n\n- [ ] still open on paper\n", encoding="utf-8")
+
+    write_task_job_status(
+        tmp_path,
+        TaskJobStatus(
+            task_id="t-example1234",
+            rel_task=f"{TASKS_DIR}/example.md",
+            completed=True,
+        ),
+    )
+
+    assert cycle._task_is_complete(tmp_path, "t-example1234", task_path) is True
+
+
 def test_auto_finalize_task_branch_reads_legacy_base_sha(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from config.defaults import LEGACY_RALPH_DATA_DIR
     from ralph_focus import cycle

@@ -409,6 +409,7 @@ class AutoFocusConfig:
             task_rel=rel_task,
             plan_rel=plan_rel,
             verify_commands=verify_commands_markdown(self.primary),
+            task_id=self.task_id,
         )
         if self.resume_handoff_pending and self.resume_handoff.strip():
             self.resume_handoff_pending = False
@@ -436,6 +437,15 @@ def _release_task_lock(cfg: AutoFocusConfig) -> None:
     if cfg.held_workspace_claim_lock_path is not None:
         release_lock(cfg.held_workspace_claim_lock_path)
         cfg.held_workspace_claim_lock_path = None
+
+
+def _task_is_complete(primary: Path, task_id: str, task_path: Path) -> bool:
+    st = read_task_job_status(primary, task_id) if task_id.strip() else None
+    if st is not None and st.completed:
+        return True
+    if not task_path.is_file():
+        return False
+    return not task_has_pending(task_path)
 
 
 def _try_workspace_claim_lock(cfg: AutoFocusConfig, primary: Path, task_abs: Path) -> bool:
@@ -583,7 +593,7 @@ def _maybe_stop_for_phase_budget(
     if cfg.phase_agent_rounds < limit:
         return None
     tp = ctx.wt_path / ctx.rel_task
-    if not tp.is_file() or not task_has_pending(tp):
+    if not tp.is_file() or _task_is_complete(cfg.primary, cfg.task_id, tp):
         return None
     return _finalize_review_required(
         cfg,
@@ -992,6 +1002,7 @@ def run_one_cycle(
             return 1
         rel_task = claimed
         _maybe_refresh_task_display_name(cfg, wt_path, rel_task, logf)
+        _print_picked_task_table(cfg, task_abs)
         plan_path = plan_file_for_task(primary, Path(rel_task).stem)
         plan_rel = plan_path.resolve().as_posix()
         plans_dir(primary).mkdir(parents=True, exist_ok=True)
@@ -1088,7 +1099,7 @@ def run_one_cycle(
     # IMPLEMENT
     if phase == "IMPLEMENT":
         n = implement_next - 1
-        while n < cfg.implement_rounds_max and (n == 0 or task_has_pending(wt_path / rel_task)):
+        while n < cfg.implement_rounds_max and (n == 0 or not _task_is_complete(cfg.primary, cfg.task_id, wt_path / rel_task)):
             n += 1
             implement_next = n
             _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
@@ -1112,7 +1123,7 @@ def run_one_cycle(
             _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
             if rc == 3:
                 return 3
-        if task_has_pending(wt_path / rel_task):
+        if not _task_is_complete(cfg.primary, cfg.task_id, wt_path / rel_task):
             return 1
         phase = "IMPROVE_REVIEW"
         improve_i = 1
@@ -1620,8 +1631,6 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
             return (1, None)
         if path_is_tasks_locked(primary, p):
             return (2, None)
-        if not task_has_pending(p):
-            return (1, None)
         if not _take_task_and_claim_lock(p):
             return (2, None)
         return (0, p)
@@ -1682,10 +1691,10 @@ def _agent_pick_backlog_task(cfg: AutoFocusConfig) -> Path | None:
     line = nf.read_text(encoding="utf-8", errors="replace").splitlines()[0].strip()
     line = concrete_task_rel(primary, line)
     abs_p = normalize_task_path(primary, line)
-    if not abs_p.is_file() or not task_has_pending(abs_p):
+    if not abs_p.is_file():
         _maybe_print_auto_pick_failure_help(
             cfg,
-            "Next-task path is missing, not a task file, or has no pending checklist items.",
+            "Next-task path is missing or does not resolve to a task markdown file.",
         )
         return None
     if path_is_tasks_locked(primary, abs_p):
@@ -1710,7 +1719,7 @@ def _print_selectable_tasks_table(cfg: AutoFocusConfig) -> None:
     from rich.console import Console
     from rich.table import Table
 
-    t = Table(title="Selectable tasks (pending, not path-locked)")
+    t = Table(title="Selectable tasks (markdown, not path-locked)")
     t.add_column("rel_path")
     t.add_column("task_id")
     t.add_column("display_name")
@@ -1722,6 +1731,32 @@ def _print_selectable_tasks_table(cfg: AutoFocusConfig) -> None:
             tid,
             (st.display_name if st and st.display_name else task_label(p)),
         )
+    Console().print(t)
+
+
+def _print_picked_task_table(cfg: AutoFocusConfig, task_abs: Path) -> None:
+    from rich.console import Console
+    from rich.table import Table
+
+    if cfg.progress == "off":
+        return
+    st = read_task_job_status(cfg.primary, cfg.task_id)
+    display_name = task_label(task_abs)
+    if st is not None and (st.display_name or "").strip():
+        display_name = st.display_name
+    t = Table(title="Picked task")
+    t.add_column("task_id")
+    t.add_column("rel_path")
+    t.add_column("lock_path")
+    t.add_column("session")
+    t.add_column("display_name")
+    t.add_row(
+        cfg.task_id,
+        task_abs.relative_to(cfg.primary).as_posix(),
+        task_abs.resolve().as_posix(),
+        cfg.runner_id,
+        display_name,
+    )
     Console().print(t)
 
 
@@ -2033,7 +2068,7 @@ def _move_completed_on_primary(cfg: AutoFocusConfig, rel: str) -> None:
     primary = cfg.primary
     rel_norm = concrete_task_rel(primary, rel)
     p = primary / rel_norm
-    if not p.is_file() or task_has_pending(p):
+    if not p.is_file() or not _task_is_complete(primary, cfg.task_id, p):
         return
     prev = read_task_job_status(primary, cfg.task_id)
     name = Path(rel_norm).name

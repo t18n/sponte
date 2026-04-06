@@ -8,7 +8,7 @@ Overwrite `__PLAN_FILE__` with a concise markdown plan containing:
 - files likely to change
 - ordered implementation steps
 - explicit acceptance criteria / done checks
-- test command from task frontmatter
+- verification command or checks inferred from the task content (if any)
 - verification notes, including these commands when relevant:
 __VERIFY_COMMANDS__
 

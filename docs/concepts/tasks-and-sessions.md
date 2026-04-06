@@ -2,7 +2,7 @@
 
 ## Task
 
-Tasks are markdown files anywhere under `.sponte/tasks/` (legacy staged paths such as `backlog/…` still work). Reserved subtrees `_tmp/` and `artifacts/` under tasks are excluded from selection.
+Tasks are markdown files anywhere under `.sponte/tasks/`. Reserved subtrees `_tmp/` and `artifacts/` under tasks are excluded from selection.
 
 Each task has a **`task_id`**: `t-` plus 16 hex characters derived from the **resolved absolute path** of the task file on disk. It stays stable while the file stays at that path; renaming or moving the file changes `task_id`.
 

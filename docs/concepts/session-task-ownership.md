@@ -19,7 +19,7 @@ Token-rotation threshold refresh is different: Sponte keeps the same session id 
 
 ## Cancellation
 
-`task-cancel` is **destructive**: it clears locks and resume state for the owner, removes the worktree (even if dirty), and moves the task file from `in-progress` back to `backlog` when applicable so the task can be claimed again.
+`task-cancel` is **destructive**: it clears locks and resume state for the owner, removes the worktree (even if dirty), and releases the task markdown back into the flat `.sponte/tasks/` store so it can be claimed again.
 
 ## Cleanup
 

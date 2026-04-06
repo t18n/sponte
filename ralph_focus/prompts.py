@@ -5,8 +5,8 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from ralph_focus.paths import guardrails_markdown_path, next_task_file, progress_markdown_path
-from ralph_focus.tasks import priorities_file, task_root
+from ralph_focus.paths import guardrails_markdown_path, next_task_file, progress_markdown_path, sponte_job_task_dir
+from ralph_focus.tasks import task_root
 
 
 def _ralph_root() -> Path:
@@ -62,6 +62,7 @@ def render_prompt(
     backlog_candidates: str = "",
     task_body_excerpt: str = "",
     naming_reply_path: str = "",
+    task_id: str = "",
 ) -> str:
     return substitute(
         load_prompt_for_workspace(name, primary),
@@ -73,6 +74,7 @@ def render_prompt(
         backlog_candidates=backlog_candidates,
         task_body_excerpt=task_body_excerpt,
         naming_reply_path=naming_reply_path,
+        task_id=task_id,
     )
 
 
@@ -87,12 +89,15 @@ def substitute(
     backlog_candidates: str = "",
     task_body_excerpt: str = "",
     naming_reply_path: str = "",
+    task_id: str = "",
 ) -> str:
+    task_status_file = ""
+    if task_id.strip():
+        task_status_file = (sponte_job_task_dir(primary, task_id) / "status.json").as_posix()
     return (
         template.replace("__TASK_FILE__", task_rel)
         .replace("__PLAN_FILE__", plan_rel)
         .replace("__TASKS_ROOT__", task_root(primary))
-        .replace("__PRIORITIES_FILE__", priorities_file(primary).relative_to(primary).as_posix())
         .replace("__GUARDRAILS_FILE__", guardrails_markdown_path(primary).relative_to(primary).as_posix())
         .replace("__PROGRESS_FILE__", progress_markdown_path(primary).relative_to(primary).as_posix())
         .replace("__NEXT_TASK_FILE__", next_task_file(primary).as_posix())
@@ -101,4 +106,5 @@ def substitute(
         .replace("__BACKLOG_CANDIDATES__", backlog_candidates)
         .replace("__TASK_BODY_EXCERPT__", task_body_excerpt)
         .replace("__NAMING_REPLY_PATH__", naming_reply_path)
+        .replace("__TASK_STATUS_FILE__", task_status_file)
     )

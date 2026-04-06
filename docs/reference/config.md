@@ -48,7 +48,7 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
 | `worktree_root` | Where Sponte creates task worktrees (relative to repo root unless absolute) |
 | `harness` | Built-in id or custom harness configuration from `init` |
 | `plan_model` / `execute_model` | Model strings interpreted by the harness |
-| `prompts` | Map of built-in prompt name → repo-relative markdown path (resolved at runtime; unknown keys are ignored). Active task-cycle prompt names include `plan`, `implement`, `improve`, `wrap_commit`, `verify`, and `agent_pick_task`. Notable: `agent_pick_task` — template for `sponte agent --auto` backlog selection (plan model); placeholders include `__BACKLOG_CANDIDATES__`, `__CLAIMED_TASKS__`, `__NEXT_TASK_FILE__`, `__TASKS_ROOT__`, etc. |
+| `prompts` | Map of built-in prompt name → repo-relative markdown path (resolved at runtime; unknown keys are ignored). Active task-cycle prompt names include `plan`, `implement`, `improve`, `wrap_commit`, `verify`, and `agent_pick_task`. Notable: `agent_pick_task` — template for `sponte agent --auto` markdown-task selection (plan model); placeholders include `__BACKLOG_CANDIDATES__`, `__CLAIMED_TASKS__`, `__NEXT_TASK_FILE__`, `__TASKS_ROOT__`, and task-phase prompts also receive `__TASK_STATUS_FILE__`. |
 | `guardrails.path` | Workspace guardrails markdown |
 | `policy.max_phase_rounds` | Phase budget before `review-required` |
 | `policy.verification_required` | When `false`, VERIFY phase is skipped |
@@ -57,7 +57,7 @@ Workspace defaults live in **`.sponte/settings.json`**. CLI flags override this 
 | `commands.dev` | Optional: local run command (e.g. dev server) |
 | `commands.check` | Optional: fast validation (lint, typecheck, or a composite script) |
 | `commands.build` | Optional: build / compile step |
-| `commands.test` | Optional: default automated test command; used as the default `test_command` when planning new tasks |
+| `commands.test` | Optional: default automated test command; used as the default verification command when planning new tasks |
 | `commands.verify` | Optional: ordered list of shell commands injected into verify-related prompts; when non-empty, overrides `RALPH_VERIFY_COMMANDS` for this workspace |
 
 ## Token saver

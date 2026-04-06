@@ -44,10 +44,10 @@ class _Harness:
         return RunResult(exit_code=0, usage={})
 
 
-def test_select_next_task_abs_uses_plan_model_not_priorities(
+def test_select_next_task_abs_uses_plan_model_without_priorities_or_checklists(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Backlog pick runs with plan_model; missing priorities.md does not block selection."""
+    """Auto-pick runs on markdown task files directly; priorities/checklists are optional."""
     monkeypatch.setenv("SPONTE_STATE_DIR", str(tmp_path / "state"))
     from ralph_focus import cycle
     from ralph_focus.paths import next_task_file
@@ -58,13 +58,11 @@ def test_select_next_task_abs_uses_plan_model_not_priorities(
     repo.mkdir()
     _git_init(repo)
 
-    backlog = repo / TASKS_DIR / "backlog"
-    backlog.mkdir(parents=True, exist_ok=True)
-    (backlog / "alpha.md").write_text("task: Alpha\n\n- [ ] a\n", encoding="utf-8")
-    (backlog / "beta.md").write_text("task: Beta\n\n- [ ] b\n", encoding="utf-8")
-
-    pri = repo / TASKS_DIR / "priorities.md"
-    assert not pri.is_file()
+    tasks_root = repo / TASKS_DIR
+    tasks_root.mkdir(parents=True, exist_ok=True)
+    (tasks_root / "alpha.md").write_text("# Alpha\n\nDo alpha.\n", encoding="utf-8")
+    (tasks_root / "nested").mkdir(parents=True, exist_ok=True)
+    (tasks_root / "nested" / "beta.md").write_text("# Beta\n\nDo beta.\n", encoding="utf-8")
 
     custom = repo / ".sponte" / "prompts" / "my_agent_pick.md"
     custom.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +77,7 @@ def test_select_next_task_abs_uses_plan_model_not_priorities(
         repo,
         TaskJobStatus(
             task_id="claimed-1",
-            rel_task=f"{TASKS_DIR}/in-progress/other.md",
+            rel_task=f"{TASKS_DIR}/other.md",
             stage="in-progress",
             owning_session_id="rap-other",
             task_title="Other",
@@ -101,10 +99,10 @@ def test_select_next_task_abs_uses_plan_model_not_priorities(
         models_seen.append(model)
         assert "Custom picker." in body
         assert "rap-other" in body
-        assert f"{TASKS_DIR}/backlog/beta.md" in body
+        assert f"{TASKS_DIR}/nested/beta.md" in body
         nf = next_task_file(repo)
         nf.parent.mkdir(parents=True, exist_ok=True)
-        nf.write_text(f"{TASKS_DIR}/backlog/beta.md\n", encoding="utf-8")
+        nf.write_text(f"{TASKS_DIR}/nested/beta.md\n", encoding="utf-8")
         return 0
 
     table_calls: list[object] = []
@@ -119,7 +117,7 @@ def test_select_next_task_abs_uses_plan_model_not_priorities(
     code, picked = cycle._select_next_task_abs(cfg)
 
     assert code == 0
-    assert picked == repo / TASKS_DIR / "backlog" / "beta.md"
+    assert picked == repo / TASKS_DIR / "nested" / "beta.md"
     assert models_seen == ["plan-model-x"]
     assert table_calls == []
 
@@ -131,8 +129,8 @@ def test_select_next_task_abs_no_agent_pick_returns_no_actionable(monkeypatch: p
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / TASKS_DIR / "backlog").mkdir(parents=True, exist_ok=True)
-    (repo / TASKS_DIR / "backlog" / "t.md").write_text("task: T\n\n- [ ] x\n", encoding="utf-8")
+    (repo / TASKS_DIR).mkdir(parents=True, exist_ok=True)
+    (repo / TASKS_DIR / "t.md").write_text("# T\n\nNo checklist needed.\n", encoding="utf-8")
 
     cfg = cycle.AutoFocusConfig(
         primary=repo,

@@ -17,7 +17,7 @@ from ralph_focus.paths import (
 )
 from ralph_focus.run_events import RunEvent, RunEventCallback, RunWatchdog
 from ralph_focus.strategies import AgentStrategy, get_strategy
-from ralph_focus.tasks import normalize_task_path, priorities_file, priority_task_paths_pending, task_has_pending, task_snapshot
+from ralph_focus.tasks import normalize_task_path, pending_selectable_task_paths, task_has_pending, task_snapshot
 
 _STREAM_JSON_STRATEGY_IDS = frozenset({"cursor", "droid"})
 _KNOWN_NON_STREAM_JSON_STRATEGY_IDS = frozenset({"claude", "codex", "amp", "oz", "warp", "custom"})
@@ -98,7 +98,7 @@ class TaskStore(Protocol):
     def resolve_task(self, repo: Path, task_arg: str) -> Path:
         ...
 
-    def priority_tasks(self, repo: Path) -> list[Path]:
+    def selectable_tasks(self, repo: Path) -> list[Path]:
         ...
 
     def task_snapshot(self, task_path: Path) -> TaskInfo:
@@ -215,13 +215,11 @@ def harness_capabilities_for_strategy(strategy_id: str) -> HarnessCapabilities:
 class FileTaskStore:
     """Thin contract adapter around existing markdown task helpers."""
 
-    priorities_filename: str = "priorities.md"
-
     def resolve_task(self, repo: Path, task_arg: str) -> Path:
         return normalize_task_path(repo, task_arg)
 
-    def priority_tasks(self, repo: Path) -> list[Path]:
-        return priority_task_paths_pending(priorities_file(repo, self.priorities_filename), repo)
+    def selectable_tasks(self, repo: Path) -> list[Path]:
+        return pending_selectable_task_paths(repo)
 
     def task_snapshot(self, task_path: Path) -> TaskInfo:
         snap = task_snapshot(task_path)

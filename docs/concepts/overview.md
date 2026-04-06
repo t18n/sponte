@@ -2,9 +2,9 @@
 
 ## Task
 
-A unit of work described as a markdown file under `.sponte/tasks/`, moving between stages such as `backlog`, `in-progress`, `review-required`, and `completed`.
+A unit of work described as a markdown file anywhere under `.sponte/tasks/`.
 
-Each active task has a stable **`task_id`** derived from the task title plus a short hash of that title (falling back to the filename stem only if the title is missing; see `sponte task-priority` for resolved ids).
+Each active task has a stable-for-that-path **`task_id`** derived from the resolved task file path (`t-<hex>`). Human-facing labels come from the markdown title or AI-generated `display_name`.
 
 ## Session
 
@@ -24,7 +24,7 @@ If machine-local resume data and repo-local job metadata disagree about ownershi
 ## Control vs inspection
 
 - **Control:** `sponte agent`, `session-resume`, `task-resume`, `task-cancel`, `task-cancel-all`, `task-cleanup`
-- **Inspection:** `status`, `session-current`, `session-show`, `task-list`, `task-priority`, `task-current`, `task-show`, `stats`, `config show`
+- **Inspection:** `status`, `session-current`, `session-show`, `task-list`, `task-current`, `task-show`, `stats`, `config show`
 
 ## Harnesses
 

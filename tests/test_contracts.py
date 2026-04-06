@@ -200,17 +200,14 @@ def test_file_task_store_wraps_existing_task_helpers(tmp_path: Path) -> None:
     from ralph_focus.contracts import FileTaskStore
 
     repo = tmp_path
-    task = repo / TASKS_DIR / "backlog" / "demo.md"
+    task = repo / TASKS_DIR / "demo.md"
     task.parent.mkdir(parents=True, exist_ok=True)
     task.write_text('task: "Demo"\n- [ ] one\n- [x] two\n', encoding="utf-8")
-    priorities = repo / TASKS_DIR / "priorities.md"
-    priorities.parent.mkdir(parents=True, exist_ok=True)
-    priorities.write_text("- [Demo](./backlog/demo.md)\n", encoding="utf-8")
 
     store = FileTaskStore()
 
-    assert store.resolve_task(repo, "backlog/demo.md") == task
-    assert store.priority_tasks(repo) == [task]
+    assert store.resolve_task(repo, "demo.md") == task
+    assert store.selectable_tasks(repo) == [task]
     assert store.task_snapshot(task).label == "Demo"
     assert store.task_snapshot(task).pending == 1
     assert store.task_snapshot(task).done == 1
