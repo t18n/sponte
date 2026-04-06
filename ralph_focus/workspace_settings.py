@@ -142,6 +142,7 @@ class WorkspaceSettings:
     policy: WorkspacePolicy = field(default_factory=WorkspacePolicy)
     custom_harness: CustomHarnessConfig | None = None
     commands: WorkspaceCommandSettings = field(default_factory=WorkspaceCommandSettings)
+    merge_backoff_exponential: dict[str, object] | None = None
 
     def normalized_trunk(self) -> str:
         s = self.trunk_branch.strip()
@@ -168,6 +169,11 @@ class WorkspaceSettings:
     def normalized_guardrails_path(self) -> str:
         s = self.guardrails_path.strip()
         return s if s else DEFAULT_GUARDRAILS_REL
+
+    def resolved_merge_backoff(self) -> "MergeBackoffSettings":
+        from ralph_focus.repo_merge_lock import MergeBackoffSettings
+
+        return MergeBackoffSettings.from_json(self.merge_backoff_exponential)
 
 
 def workspace_settings_path(root: Path) -> Path:
@@ -205,6 +211,7 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
     policy_raw = raw.get("policy")
     custom_raw = raw.get("custom_harness")
     commands_raw = raw.get("commands")
+    merge_backoff_raw = raw.get("merge_backoff_exponential")
 
     guardrails_path = ""
     if isinstance(guardrails, dict):
@@ -215,6 +222,10 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
         guardrails_path = guardrails.strip()
 
     custom = CustomHarnessConfig.from_json(custom_raw) if custom_raw is not None else None
+
+    merge_backoff: dict[str, object] | None = None
+    if isinstance(merge_backoff_raw, dict):
+        merge_backoff = dict(merge_backoff_raw)
 
     return WorkspaceSettings(
         trunk_branch=trunk.strip() if isinstance(trunk, str) and trunk.strip() else DEFAULT_TRUNK_BRANCH,
@@ -235,6 +246,7 @@ def load_workspace_settings(root: Path) -> WorkspaceSettings:
             if isinstance(commands_raw, dict)
             else WorkspaceCommandSettings()
         ),
+        merge_backoff_exponential=merge_backoff,
     )
 
 
@@ -268,6 +280,8 @@ def save_workspace_settings(root: Path, settings: WorkspaceSettings) -> None:
         payload["commands"] = cmd_payload
     if custom_payload is not None:
         payload["custom_harness"] = custom_payload
+    if settings.merge_backoff_exponential:
+        payload["merge_backoff_exponential"] = settings.merge_backoff_exponential
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
