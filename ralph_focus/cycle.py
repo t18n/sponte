@@ -84,10 +84,12 @@ from ralph_focus.task_jobs import (
     SessionJobStatus,
     TaskJobStatus,
     init_task_job_artifacts,
+    read_task_job_status,
     touch_session_job_folder,
     write_session_job_status,
     write_task_job_status,
 )
+from ralph_focus.task_lifecycle import _clear_session_active_task, _restore_task_to_backlog
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
 from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.tasks import (
@@ -683,6 +685,85 @@ def _teardown_plan_only_worktree(cfg: AutoFocusConfig, wt_path: Path, br_name: s
         git(primary, "worktree", "remove", "-f", str(wt_path))
     git(primary, "branch", "-D", br_name)
     cfg.current_wt_path = None
+
+
+def _branch_checked_out_at(wt_path: Path) -> str:
+    code, out, _ = git(wt_path, "rev-parse", "--abbrev-ref", "HEAD")
+    if code != 0:
+        return ""
+    name = (out or "").strip()
+    if not name or name == "HEAD":
+        return ""
+    return name
+
+
+def abandon_auto_pick_cycle_on_failure(
+    cfg: AutoFocusConfig,
+    *,
+    resume_hint: ResumeState | None = None,
+) -> None:
+    """Tear down a failed cycle so ``sponte agent --auto`` can pick another task.
+
+    Best-effort: clears resume, removes the worktree and task branch, releases the
+    workspace claim lock, restores job rows, and clears the session active task.
+    """
+    primary = cfg.primary
+    st = resume_hint if resume_hint is not None else load_resume(primary, runner_id=cfg.runner_id)
+
+    wt_path: Path | None = cfg.current_wt_path
+    if wt_path is None and st is not None and (st.wt_path or "").strip():
+        wt_path = Path(st.wt_path)
+
+    br_name = (st.branch if st else "").strip()
+    if not br_name and wt_path is not None and wt_path.is_dir():
+        br_name = _branch_checked_out_at(wt_path)
+
+    tid = ((cfg.task_id or "").strip() or ((st.task_id if st else "") or "").strip())
+    rel_for_backlog = (st.rel_task or "").strip() if st is not None else ""
+    if not rel_for_backlog and tid:
+        tjs0 = read_task_job_status(primary, tid)
+        if tjs0 is not None:
+            rel_for_backlog = (tjs0.rel_task or "").strip()
+
+    clear_resume(primary, runner_id=cfg.runner_id)
+
+    if wt_path is not None and wt_path.is_dir() and worktree_registered(primary, wt_path):
+        git(primary, "worktree", "remove", "-f", str(wt_path))
+
+    if br_name.strip():
+        git(primary, "branch", "-D", br_name)
+
+    _release_task_lock(cfg)
+    cfg.current_wt_path = None
+
+    new_rel_for_session = ""
+    if tid:
+        tjs = read_task_job_status(primary, tid)
+        title = (tjs.task_title if tjs else "") or ""
+        rel_src = rel_for_backlog or ((tjs.rel_task if tjs else "") or "").strip()
+        if rel_src:
+            new_rel_for_session = _restore_task_to_backlog(primary, rel_src)
+            write_task_job_status(
+                primary,
+                TaskJobStatus(
+                    task_id=tid,
+                    rel_task=new_rel_for_session,
+                    stage="backlog",
+                    owning_session_id="",
+                    worktree_path="",
+                    branch="",
+                    task_title=title,
+                ),
+            )
+
+    _clear_session_active_task(
+        primary,
+        cfg.runner_id,
+        rel_task=new_rel_for_session,
+        phase="",
+        worktree_path="",
+        branch="",
+    )
 
 
 def run_one_cycle(

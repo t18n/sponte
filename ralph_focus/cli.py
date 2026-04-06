@@ -31,7 +31,12 @@ from config.defaults import (
 )
 from config.defaults import TASKS_DIR
 from ralph_focus.harness_resolve import resolve_harness
-from ralph_focus.cycle import AutoFocusConfig, ProgressMode, run_one_cycle
+from ralph_focus.cycle import (
+    AutoFocusConfig,
+    ProgressMode,
+    abandon_auto_pick_cycle_on_failure,
+    run_one_cycle,
+)
 from ralph_focus.failure_detection import FailureKind
 from ralph_focus.interactive_setup import resolve_choice_index
 from ralph_focus.paths import rotation_handoff_file
@@ -959,6 +964,24 @@ def cmd_agent(
                 )
                 failure_kind = cfg.last_failure_kind
                 failure_detail = cfg.last_failure_detail.strip()
+                if (
+                    auto_pick
+                    and rc == 1
+                    and failure_kind in (FailureKind.GUTTER, FailureKind.FATAL)
+                ):
+                    if failure_detail:
+                        console.print(f"[red]{failure_detail}[/red]")
+                        _print_disk_full_resume_hint(
+                            failure_detail,
+                            runner_id=runner_id_effective,
+                        )
+                    abandon_auto_pick_cycle_on_failure(cfg, resume_hint=resume_st)
+                    console.print(
+                        "[yellow]Skipping to next pending task (--auto).[/yellow]"
+                    )
+                    consecutive_cycle_errors = 0
+                    cfg.task_arg = ""
+                    continue
                 if failure_kind in (FailureKind.GUTTER, FailureKind.FATAL):
                     stats.exit_reason = failure_kind.value
                     if failure_detail:
