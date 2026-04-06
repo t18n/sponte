@@ -25,3 +25,4 @@
 - `agent --auto` should choose tasks via the plan model with lock-aware backlog selection instead of relying on `priorities.md`.
 - `sponte agent` uses `--task`, `--resume-session`, and `--resume-task`; `--auto` requires an initialized task store and otherwise should point users to `sponte task-plan`.
 - App state for `session-resume` is keyed by resolved workspace root; use the same checkout path and `--workspace` convention as the original `sponte agent` run or resume files may be missing even when the CLI printed a resume hint.
+- Task `task_id` is path-derived (`t-` + hex); legacy title-based job folders can be renamed with `sponte task-cleanup --migrate-task-ids` when the task file still exists at `rel_task`. `cleanup_pending` defers pruning `.sponte/jobs/tasks/<task_id>/` after completion; `task-cleanup` retries that prune when the task file is gone.

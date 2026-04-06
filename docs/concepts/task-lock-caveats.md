@@ -28,8 +28,10 @@ If `tasks.lock` is **committed**, teammates pull **your machine’s** absolute p
 - After moving or renaming a repo directory, **clear or regenerate** `tasks.lock` if behavior looks stuck.
 - For automation, rely on **session** ids and **repo-relative** task paths when you need the same logical task across clones; treat absolutes in `tasks.lock` as **runtime bookkeeping**, not a portable identifier across clones.
 
-## `task_id` derived from absolute path (planned)
+## `task_id` from resolved absolute path
 
-If Sponte derives **`task_id`** from the resolved **absolute path** of the task file (e.g. hash of `Path.resolve()`), then the same markdown at `.sponte/tasks/foo.md` in two clones gets **two different** `task_id` values, because the absolute prefixes differ. That is consistent with absolute entries in `tasks.lock` but means **`.sponte/jobs/tasks/<task_id>/`** metadata does not transfer between machines by id alone—use **relative path** or **human-facing names** (e.g. AI-generated display title in `status.json`) when communicating about a task across checkouts.
+Sponte derives **`task_id`** as `t-` plus 16 hex characters from the **resolved absolute path** of the task markdown (`Path.resolve()`). The same repo-relative file in two clones therefore gets **two different** `task_id` values because the absolute prefixes differ. That matches absolute lines in `tasks.lock` but means **`.sponte/jobs/tasks/<task_id>/`** does not transfer between machines by id alone—use **repo-relative path**, **display_name** in `status.json`, or communicate the markdown path when coordinating across checkouts.
+
+Legacy workspaces may still have title-based job directories; `sponte task-cleanup --migrate-task-ids` renames them when `rel_task` still points at an on-disk file.
 
 Related: [tasks and sessions](tasks-and-sessions.md), [session and task ownership](session-task-ownership.md).

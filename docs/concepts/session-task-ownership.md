@@ -23,4 +23,4 @@ Token-rotation threshold refresh is different: Sponte keeps the same session id 
 
 ## Cleanup
 
-`task-cleanup` is an **explicit repair** command. Normal commands should not silently fix unrelated stale state. Run it when you suspect orphan locks or job rows pointing at missing worktrees.
+`task-cleanup` is an **explicit repair** command. Normal commands should not silently fix unrelated stale state. Run it when you suspect orphan locks or job rows pointing at missing worktrees, stale `tasks.lock` lines for deleted files, or a **completed** task whose job directory was left behind with `cleanup_pending`. Use `--migrate-task-ids` once when upgrading from legacy title-based job folder names to path-derived ids (only when the task file still exists at `rel_task`).

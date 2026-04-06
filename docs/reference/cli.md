@@ -24,7 +24,7 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 | --- | --- |
 | `task-cancel TASK_ID` | Destructive: drop worktree, clear locks/resume for owner, move primary task file from `in-progress` → `backlog` when present |
 | `task-cancel-all` | Cancel every active task found under `.sponte/jobs/tasks/` |
-| `task-cleanup` | Conservative repair of stale locks and orphan `in-progress` rows when the worktree is gone |
+| `task-cleanup` | Prune stale `tasks.lock` lines, retry deferred completed job-dir removal (`cleanup_pending`), stale claim locks, orphan `in-progress` rows when the worktree is gone; optional `--migrate-task-ids` renames legacy job dirs to path-derived ids |
 
 ## Inspection
 
