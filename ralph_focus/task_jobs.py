@@ -71,6 +71,49 @@ def write_task_job_status(repo: Path, status: TaskJobStatus) -> None:
     _write_json(path, status.to_json_dict())
 
 
+def append_task_job_artifact(
+    repo: Path,
+    task_id: str,
+    entry: dict[str, str],
+) -> None:
+    """Append a manifest entry if ``task_id`` job exists; skip duplicate ``archive_name``."""
+    st = read_task_job_status(repo, task_id)
+    if st is None:
+        return
+    archive_name = (entry.get("archive_name") or "").strip()
+    if not archive_name:
+        return
+    if any((e.get("archive_name") or "").strip() == archive_name for e in st.artifacts):
+        return
+    clean = {str(k): str(v) for k, v in entry.items() if isinstance(k, str) and isinstance(v, str)}
+    if not clean:
+        return
+    arts = list(st.artifacts)
+    arts.append(clean)
+    write_task_job_status(
+        repo,
+        TaskJobStatus(
+            schema_version=st.schema_version,
+            task_id=st.task_id,
+            rel_task=st.rel_task,
+            stage=st.stage,
+            owning_session_id=st.owning_session_id,
+            worktree_path=st.worktree_path,
+            branch=st.branch,
+            task_title=st.task_title,
+            updated_at=st.updated_at,
+            display_name=st.display_name,
+            ai_summary=st.ai_summary,
+            display_name_source=st.display_name_source,
+            completed=st.completed,
+            cleanup_pending=st.cleanup_pending,
+            review_required=st.review_required,
+            naming_content_hash=st.naming_content_hash,
+            artifacts=arts,
+        ),
+    )
+
+
 def read_task_job_status(repo: Path, task_id: str) -> TaskJobStatus | None:
     path = sponte_job_task_dir(repo, task_id) / "status.json"
     if not path.is_file():
