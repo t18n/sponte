@@ -132,9 +132,7 @@ _COUNTED_AGENT_PHASES = frozenset({
     "IMPLEMENT",
     "IMPROVE_REVIEW",
     "IMPROVE_EXECUTE",
-    "FOLLOWUP",
     "WRAP",
-    "PRIORITIES",
     "VERIFY",
 })
 
@@ -1086,7 +1084,7 @@ def run_one_cycle(
     # IMPLEMENT
     if phase == "IMPLEMENT":
         n = implement_next - 1
-        while task_has_pending(wt_path / rel_task) and n < cfg.implement_rounds_max:
+        while n < cfg.implement_rounds_max and (n == 0 or task_has_pending(wt_path / rel_task)):
             n += 1
             implement_next = n
             _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
@@ -1170,30 +1168,8 @@ def run_one_cycle(
             _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, i, j, conflict_next)
         improve_i = i
         improve_j = j
-        phase = "FOLLOWUP"
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
-
-    if phase == "FOLLOWUP":
-        _append_phase_log(logf, "FOLLOWUP_TICKETS")
-        rc = _run_phase_agent(
-            cfg,
-            phase="FOLLOWUP",
-            prompt_name="followup_tickets",
-            wt_path=wt_path,
-            rel_task=rel_task,
-            plan_rel=plan_rel,
-            logf=logf,
-            label="FOLLOWUP_TICKETS",
-            phase_budget=_pb(),
-        )
-        if rc == 4:
-            return 0
-        if rc == 1:
-            return rc
         phase = "WRAP"
         _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
-        if rc == 3:
-            return 3
 
     if phase == "WRAP":
         _append_phase_log(logf, "WRAP_COMMIT")
@@ -1213,30 +1189,6 @@ def run_one_cycle(
         if rc == 1:
             return rc
         _auto_finalize_task_branch(primary, wt_path, rel_task)
-        phase = "PRIORITIES"
-        _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
-        if rc == 3:
-            return 3
-
-    if phase == "PRIORITIES":
-        _append_phase_log(logf, "PRIORITIES")
-        rc = _run_phase_agent(
-            cfg,
-            phase="PRIORITIES",
-            prompt_name="priorities",
-            wt_path=wt_path,
-            rel_task=rel_task,
-            plan_rel=plan_rel,
-            logf=logf,
-            label="PRIORITIES",
-            phase_budget=_pb(),
-        )
-        if rc == 4:
-            return 0
-        if rc == 1:
-            return rc
-        if not _commit_worktree_pending_if_dirty(wt_path, logf, "priorities after agent"):
-            return 1
         if cfg.verification_required:
             phase = "VERIFY"
         else:
@@ -1281,8 +1233,8 @@ def run_one_cycle(
                     float(MERGE_LOCK_TIMEOUT_SEC),
                 ),
             ):
-                # Resume at MERGE skips PRIORITIES (and its post-phase commit). Any dirty worktree
-                # would block merge — commit pending changes here too.
+                # Resume at MERGE skips VERIFY and any dirty worktree would block merge.
+                # Commit pending changes here too.
                 merge_dirty_before = not worktree_clean(wt_path)
                 if merge_dirty_before:
                     _append_phase_log(logf, "PRE_MERGE_COMMIT")

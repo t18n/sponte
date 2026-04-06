@@ -21,5 +21,5 @@ def test_phase_bar_line_marks_estimated_live_tokens() -> None:
     assert "tokens~=12,345" in line
 
 
-def test_max_agent_steps_includes_verify_phase() -> None:
-    assert max_agent_steps(implement_max=15, improve_implement_max=5, conflict_max=5) == 43
+def test_max_agent_steps_matches_phase_sequence_without_followup_or_priorities() -> None:
+    assert max_agent_steps(implement_max=15, improve_implement_max=5, conflict_max=5) == 41

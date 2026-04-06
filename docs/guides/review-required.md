@@ -2,7 +2,7 @@
 
 ## What triggered it
 
-The workspace policy **`max_phase_rounds`** (default 20) limits how many **counted agent phases** run while the task checklist still has pending items. When the limit is reached, Sponte:
+The workspace policy **`max_phase_rounds`** (default 20) limits how many **counted agent phases** run in a single task run/resume slice while the task checklist still has pending items. When the limit is reached, Sponte:
 
 - moves the task to **`review-required`**
 - clears exclusive claim so another session can take work

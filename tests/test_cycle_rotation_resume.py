@@ -84,6 +84,35 @@ def test_plan_rotation_advances_to_next_phase_before_exit(monkeypatch, tmp_path:
     assert persisted == ["IMPLEMENT"]
 
 
+def test_plan_runs_initial_implement_before_improve(monkeypatch, tmp_path: Path) -> None:
+    cfg = AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(),
+        plan_model="planner",
+        execute_model="executor",
+    )
+    state = _base_resume_state(tmp_path, "PLAN")
+    task_path = Path(state.wt_path) / state.rel_task
+    task_path.write_text('task: "Example"\n- [x] done\n', encoding="utf-8")
+    labels: list[str] = []
+
+    from ralph_focus import cycle
+
+    monkeypatch.setattr(cycle, "worktree_registered", lambda _primary, _wt: True)
+
+    def fake_run_phase_agent(_cfg, *, label: str, **_kwargs) -> int:
+        labels.append(label)
+        return 0 if label == "PLAN" else 3
+
+    monkeypatch.setattr(cycle, "_run_phase_agent", fake_run_phase_agent)
+    monkeypatch.setattr(cycle, "_persist", lambda *args, **kwargs: None)
+
+    rc = run_one_cycle(cfg, use_resume=True, resume_state=state)
+
+    assert rc == 3
+    assert labels == ["PLAN", "IMPLEMENT_1"]
+
+
 def test_implement_rotation_persists_next_round_before_exit(monkeypatch, tmp_path: Path) -> None:
     cfg = AutoFocusConfig(
         primary=tmp_path,
@@ -137,7 +166,7 @@ def test_wrap_rotation_finalizes_and_advances_before_exit(monkeypatch, tmp_path:
 
     assert rc == 3
     assert finalized is True
-    assert persisted == ["PRIORITIES"]
+    assert persisted == ["VERIFY"]
 
 
 def test_resume_restores_rotation_budget_and_warning_state(monkeypatch, tmp_path: Path) -> None:

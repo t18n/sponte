@@ -50,8 +50,8 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 `.sponte/settings.json` `policy` section includes:
 
-- `max_phase_rounds` (default 20): when an active task still has pending checklist items after that many counted agent phases, Sponte moves it to `review-required`, stops the loop for that task, and frees the claim so another session can pick it up via `task-resume`.
+- `max_phase_rounds` (default 20): when an active task still has pending checklist items after that many counted agent phases in a single run/resume slice, Sponte moves it to `review-required`, stops the loop for that task, and frees the claim so another session can pick it up via `task-resume`.
 - `verification_required: false` skips the VERIFY phase.
-- `merge_required: false` skips merging the feature branch into the trunk on the primary checkout after wrap/priorities; you merge manually. The worktree is still torn down and the session completes the task from Sponte’s perspective; local branch deletion may use `git branch -D` when the branch was never merged.
+- `merge_required: false` skips merging the feature branch into the trunk on the primary checkout after wrap/verify; you merge manually. The worktree is still torn down and the session completes the task from Sponte’s perspective; local branch deletion may use `git branch -D` when the branch was never merged.
 
 See [backpressure.md](../concepts/backpressure.md) and [config.md](config.md).

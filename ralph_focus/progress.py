@@ -24,7 +24,7 @@ def max_agent_steps(
     improve_implement_max: int,
     conflict_max: int,
 ) -> int:
-    return 1 + implement_max + 3 + 3 * improve_implement_max + 1 + 1 + 1 + 1 + conflict_max
+    return 1 + implement_max + 3 + 3 * improve_implement_max + 1 + 1 + conflict_max
 
 
 def banner(msg: str, *, err: TextIO | None = None) -> None:

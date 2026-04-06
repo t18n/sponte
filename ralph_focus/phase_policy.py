@@ -7,9 +7,7 @@ EXECUTOR_PHASES = frozenset(
     {
         "IMPLEMENT",
         "IMPROVE_EXECUTE",
-        "FOLLOWUP",
         "WRAP",
-        "PRIORITIES",
         "MERGE_CONFLICT",
         "PRIMARY_PREMERGE",
     }
