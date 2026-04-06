@@ -24,3 +24,4 @@
 - `sponte init` should add `.sponte/` to `.gitignore` before other init work; if `worktree_root` is outside `.sponte/`, ignore that path too.
 - `agent --auto` should choose tasks via the plan model with lock-aware backlog selection instead of relying on `priorities.md`.
 - `sponte agent` uses `--task`, `--resume-session`, and `--resume-task`; `--auto` requires an initialized task store and otherwise should point users to `sponte task-plan`.
+- App state for `session-resume` is keyed by resolved workspace root; use the same checkout path and `--workspace` convention as the original `sponte agent` run or resume files may be missing even when the CLI printed a resume hint.
