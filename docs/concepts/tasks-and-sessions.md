@@ -25,7 +25,7 @@ While a task is actively worked, Sponte uses a dedicated git worktree. The path 
 ## Typical flow
 
 1. Pending tasks (checklist items still open) are discoverable under `.sponte/tasks/`; `--auto` uses the plan model and `prompts.agent_pick_task` with lock-aware context.
-2. `sponte agent` claims a task: computes `task_id`, takes the per-task lock, appends the primary’s absolute task path to `tasks.lock`, creates the worktree, and writes job rows under `.sponte/jobs/`. The task file is **not** moved to `in-progress` by default.
+2. `sponte agent` claims a task: computes `task_id`, takes the per-task lock, appends the primary’s absolute task path to `tasks.lock`, creates the worktree, and writes job rows under `.sponte/jobs/`. The task file is **not** moved to `in-progress` by default. In `--auto` mode, if setup fails before those resumable job rows are persisted, Sponte warns, tears down the failed attempt best-effort, and tries another pending task.
 3. Phases run in the worktree (plan, implement, verify, merge to trunk by default). Merge serializes on the primary with both app-state branch locks and repo-local `.sponte/locks/merge.lock` (session id + configurable backoff in `merge_backoff_exponential`).
 4. On success, the task file is removed from the primary branch (`git rm` when tracked), the path is removed from `tasks.lock`, and the per-task job directory is pruned unless `cleanup_pending` is set (e.g. the file could not be removed or the job dir could not be deleted—run `sponte task-cleanup` after fixing the tree).
 5. On `review-required` (policy: max phase rounds), the path is removed from `tasks.lock`, `review_required` is set in job status, and the claim is cleared so another session can use `task-resume`.

@@ -569,7 +569,10 @@ def cmd_agent(
         bool,
         typer.Option(
             "--auto",
-            help="Pick next pending task via plan model (lock-aware; prompt: prompts.agent_pick_task)",
+            help=(
+                "Pick next pending task via plan model "
+                "(lock-aware; prompt: prompts.agent_pick_task; warn and skip picked-task setup failures)"
+            ),
         ),
     ] = False,
     allow_agent_pick: Annotated[

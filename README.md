@@ -179,6 +179,7 @@ It will:
 2. prompt for one or more task titles, goals, and verification commands
 3. write task markdown files under `.sponte/tasks/`
 4. let `sponte agent --auto` choose among unlocked markdown tasks via the plan model
+5. warn and continue to another task if a picked task hits a stale setup collision before resume state is persisted
 
 ## Recovery Flow
 

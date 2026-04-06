@@ -292,6 +292,8 @@ class AutoFocusConfig:
     last_failure_kind: FailureKind | None = None
     last_failure_detail: str = ""
     last_agent_error_detail: str = ""
+    failed_setup_branch: str = ""
+    failed_setup_wt_path: Path | None = None
     resume_handoff: str = ""
     resume_handoff_pending: bool = False
     trunk_branch_override: str | None = None
@@ -438,6 +440,24 @@ def _release_task_lock(cfg: AutoFocusConfig) -> None:
     if cfg.held_workspace_claim_lock_path is not None:
         release_lock(cfg.held_workspace_claim_lock_path)
         cfg.held_workspace_claim_lock_path = None
+
+
+def _clear_failed_setup_context(cfg: AutoFocusConfig) -> None:
+    cfg.failed_setup_branch = ""
+    cfg.failed_setup_wt_path = None
+
+
+def _mark_setup_failure(
+    cfg: AutoFocusConfig,
+    *,
+    detail: str,
+    branch_name: str,
+    wt_path: Path | None = None,
+) -> None:
+    cfg.last_failure_kind = FailureKind.FATAL
+    cfg.last_failure_detail = detail.strip() or "task setup failed"
+    cfg.failed_setup_branch = branch_name.strip()
+    cfg.failed_setup_wt_path = wt_path
 
 
 def _task_is_complete(primary: Path, task_id: str, task_path: Path) -> bool:
@@ -789,10 +809,14 @@ def abandon_auto_pick_cycle_on_failure(
     wt_path: Path | None = cfg.current_wt_path
     if wt_path is None and st is not None and (st.wt_path or "").strip():
         wt_path = Path(st.wt_path)
+    if wt_path is None and cfg.failed_setup_wt_path is not None:
+        wt_path = cfg.failed_setup_wt_path
 
     br_name = (st.branch if st else "").strip()
     if not br_name and wt_path is not None and wt_path.is_dir():
         br_name = _branch_checked_out_at(wt_path)
+    if not br_name:
+        br_name = cfg.failed_setup_branch.strip()
 
     tid = ((cfg.task_id or "").strip() or ((st.task_id if st else "") or "").strip())
     rel_for_backlog = (st.rel_task or "").strip() if st is not None else ""
@@ -817,6 +841,7 @@ def abandon_auto_pick_cycle_on_failure(
 
     _release_task_lock(cfg)
     cfg.current_wt_path = None
+    _clear_failed_setup_context(cfg)
 
     new_rel_for_session = ""
     if tid:
@@ -875,6 +900,7 @@ def run_one_cycle(
     cfg.progress_agent_step = 0
     cfg.last_failure_kind = None
     cfg.last_failure_detail = ""
+    _clear_failed_setup_context(cfg)
 
     if use_resume:
         st = resume_state or load_resume(
@@ -984,6 +1010,7 @@ def run_one_cycle(
         rc, _, err = git(primary, "worktree", "add", "-b", br_name, str(wt_path), main_ref)
         if rc != 0:
             logf.write_text(logf.read_text(encoding="utf-8") + err, encoding="utf-8")
+            _mark_setup_failure(cfg, detail=err, branch_name=br_name, wt_path=wt_path)
             _release_task_lock(cfg)
             return 1
         cfg.current_wt_path = wt_path
@@ -1000,6 +1027,12 @@ def run_one_cycle(
         )
         claimed = _claim_task_on_primary(cfg, task_abs, task_rel, logf)
         if claimed is None:
+            _mark_setup_failure(
+                cfg,
+                detail="Could not claim selected task on primary checkout.",
+                branch_name=br_name,
+                wt_path=wt_path,
+            )
             _release_task_lock(cfg)
             return 1
         rel_task = claimed

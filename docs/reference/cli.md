@@ -14,7 +14,7 @@ Run `sponte --help` and `sponte <command> --help` for the full Typer help.
 
 | Command | Purpose |
 | --- | --- |
-| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` wraps `--resume-session`; `--task`, `--auto`, `--resume-task` for task selection / recovery). Token-rotation threshold refresh stays inside the same loop for built-in harnesses, so normal context refresh does not require `session-resume`. `--auto` picks among unlocked markdown tasks under `.sponte/tasks/` using the plan model and `prompts.agent_pick_task`. If the CLI leaves a worktree behind, it prints `session-resume` only when a valid resume file exists; otherwise it points at `task-resume` / `task-current` |
+| `agent` | Main loop: claim task, worktree, phases, merge (`session-resume` wraps `--resume-session`; `--task`, `--auto`, `--resume-task` for task selection / recovery). Token-rotation threshold refresh stays inside the same loop for built-in harnesses, so normal context refresh does not require `session-resume`. `--auto` picks among unlocked markdown tasks under `.sponte/tasks/` using the plan model and `prompts.agent_pick_task`; if a picked task fails during setup before resume state is persisted (for example a stale branch/worktree collision), Sponte warns, abandons that attempt, and skips to the next pending task. If the CLI leaves a worktree behind, it prints `session-resume` only when a valid resume file exists; otherwise it points at `task-resume` / `task-current` |
 | `session-resume SESSION_ID` | Resume an interrupted session by id; prints a one-line reason if nothing can be loaded (e.g. `missing_file`, `primary_mismatch`) |
 | `task-resume TASK_ID` | New session id; rewrites resume for existing worktree + task |
 

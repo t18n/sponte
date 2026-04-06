@@ -31,7 +31,7 @@ Add one or more task markdown files. Optionally edit markdown under `.sponte/tas
 sponte agent --workspace /path/to/repo --task /path/to/repo/.sponte/tasks/my-task.md
 ```
 
-Or use `sponte agent --workspace /path/to/repo --auto` so Sponte picks the next unlocked markdown task with the **plan model** (lock-aware: it sees claimed tasks under `.sponte/jobs/` and `tasks.lock`). Override the selection prompt via `.sponte/settings.json` → `prompts.agent_pick_task` (repo-relative markdown). Use `sponte status` and `sponte task-current` to see ownership.
+Or use `sponte agent --workspace /path/to/repo --auto` so Sponte picks the next unlocked markdown task with the **plan model** (lock-aware: it sees claimed tasks under `.sponte/jobs/` and `tasks.lock`). If a picked task hits a stale setup collision before resume state exists, Sponte warns and moves on to the next pending task instead of exiting the whole loop. Override the selection prompt via `.sponte/settings.json` → `prompts.agent_pick_task` (repo-relative markdown). Use `sponte status` and `sponte task-current` to see ownership.
 
 ## Learn more
 

@@ -247,6 +247,92 @@ def test_auto_focus_auto_skips_on_fatal_and_continues(monkeypatch, tmp_path: Pat
     assert "Skipping to next pending task" in (result.stdout + result.stderr)
 
 
+def test_auto_focus_auto_skips_pre_persist_setup_failure_and_continues(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+    from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
+    from ralph_focus.failure_detection import FailureKind
+
+    class _Harness:
+        id = "cursor"
+        display_name = "Cursor"
+        capabilities = HarnessCapabilities()
+
+        def availability(self) -> AvailabilityReport:
+            return AvailabilityReport(available=True)
+
+        def prepare(self, request: RunRequest) -> RunRequest:
+            return request
+
+        def run(self, request: RunRequest) -> RunResult:
+            return RunResult(exit_code=0, usage={})
+
+    harness = _Harness()
+    calls: list[int] = []
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
+    monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "get_strategy",
+        lambda _p, _name: (_ for _ in ()).throw(AssertionError("cli should use resolve_harness")),
+        raising=False,
+    )
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, name: harness, raising=False)
+    monkeypatch.setattr(cli, "load_resume", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        cli,
+        "load_resume_detailed",
+        lambda *_a, **_k: (None, ResumeLoadFailureReason.missing_file),
+    )
+
+    def fake_abandon(c, *, resume_hint=None) -> None:
+        seen["resume_hint"] = resume_hint
+        seen["failed_setup_branch"] = c.failed_setup_branch
+        c.failed_setup_branch = ""
+        c.current_wt_path = None
+
+    monkeypatch.setattr(cli, "abandon_auto_pick_cycle_on_failure", fake_abandon)
+
+    def fake_run_one_cycle(cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            cfg.last_failure_kind = FailureKind.FATAL
+            cfg.last_failure_detail = "fatal: a branch named 'ralph/wt-t-example1234' already exists"
+            cfg.failed_setup_branch = "ralph/wt-t-example1234"
+            return 1
+        return 2
+
+    monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
+
+    (tmp_path / TASKS_DIR).mkdir(parents=True)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "agent",
+            "--auto",
+            "--skip-preflight",
+            "--agent",
+            "cursor",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(calls) == 2
+    assert seen["resume_hint"] is None
+    assert seen["failed_setup_branch"] == "ralph/wt-t-example1234"
+    assert "already exists" in _output(result)
+    assert "Skipping to next pending task" in _output(result)
+
+
 def test_auto_pick_exits_when_task_store_missing(monkeypatch, tmp_path: Path) -> None:
     from ralph_focus import cli
 
@@ -899,6 +985,7 @@ def test_agent_help_uses_session_language_for_resume_option() -> None:
     assert "--task" in result.stdout
     assert "--auto" in result.stdout
     assert "plan model" in result.stdout.lower()
+    assert "warn and skip" in result.stdout.lower()
     assert "refresh harness" in result.stdout.lower()
     assert "automatically" in result.stdout.lower()
 
