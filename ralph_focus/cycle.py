@@ -88,6 +88,7 @@ from ralph_focus.session_stats import SessionStats, _usage_rotation_tokens
 from ralph_focus.task_jobs import (
     SessionJobStatus,
     TaskJobStatus,
+    append_task_job_artifact,
     init_task_job_artifacts,
     read_task_job_status,
     touch_session_job_folder,
@@ -486,6 +487,7 @@ def _finalize_review_required(
             display_name_source=(prev.display_name_source if prev else ""),
             naming_content_hash=(prev.naming_content_hash if prev else ""),
             artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
+            cleanup_pending=bool(prev.cleanup_pending) if prev else False,
             review_required=True,
         ),
     )
@@ -1022,8 +1024,12 @@ def run_one_cycle(
             if rc == 3:
                 _teardown_plan_only_worktree(cfg, wt_path, br_name, primary)
                 return 3
+            if rc == 0:
+                _register_plan_file_artifact(cfg, plan_rel)
             _teardown_plan_only_worktree(cfg, wt_path, br_name, primary)
             return 0
+        if rc == 0:
+            _register_plan_file_artifact(cfg, plan_rel)
         phase = "IMPLEMENT"
         implement_next = 1
         _persist(cfg, logf, wt_path, br_name, main_ref, rel_task, plan_rel, phase, implement_next, improve_i, improve_j, conflict_next)
@@ -1766,6 +1772,22 @@ def _claim_task_on_primary(cfg: AutoFocusConfig, task_abs: Path, rel_task: str, 
     return rel_task
 
 
+def _register_plan_file_artifact(cfg: AutoFocusConfig, plan_rel: str) -> None:
+    if not cfg.task_id.strip() or not plan_rel.strip():
+        return
+    plan_path = Path(plan_rel)
+    if not plan_path.is_file():
+        return
+    append_task_job_artifact(
+        cfg.primary,
+        cfg.task_id,
+        {
+            "source_abs": plan_path.resolve().as_posix(),
+            "archive_name": plan_path.name,
+        },
+    )
+
+
 def _archive_recorded_artifacts(cfg: AutoFocusConfig, wt_path: Path) -> None:
     st = read_task_job_status(cfg.primary, cfg.task_id)
     if st is None or not st.artifacts:
@@ -1774,10 +1796,16 @@ def _archive_recorded_artifacts(cfg: AutoFocusConfig, wt_path: Path) -> None:
     dest_root.mkdir(parents=True, exist_ok=True)
     for ent in st.artifacts:
         src_rel = (ent.get("source_rel") or "").strip()
+        src_abs = (ent.get("source_abs") or "").strip()
         archive_name = (ent.get("archive_name") or "").strip()
-        if not src_rel or not archive_name:
+        if not archive_name:
             continue
-        src = wt_path / src_rel
+        if src_abs:
+            src = Path(src_abs)
+        elif src_rel:
+            src = wt_path / src_rel
+        else:
+            continue
         if src.is_file():
             try:
                 shutil.copy2(src, dest_root / archive_name)
@@ -1982,28 +2010,6 @@ def _move_completed_on_primary(cfg: AutoFocusConfig, rel: str) -> None:
     if not p.is_file() or task_has_pending(p):
         return
     prev = read_task_job_status(primary, cfg.task_id)
-    write_task_job_status(
-        primary,
-        TaskJobStatus(
-            task_id=cfg.task_id,
-            rel_task=rel_norm,
-            stage="completed",
-            owning_session_id="",
-            worktree_path="",
-            branch="",
-            task_title=(prev.task_title if prev else task_label(p)),
-            display_name=(prev.display_name if prev else ""),
-            ai_summary=(prev.ai_summary if prev else ""),
-            display_name_source=(prev.display_name_source if prev else ""),
-            naming_content_hash=(prev.naming_content_hash if prev else ""),
-            artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
-            completed=True,
-        ),
-    )
-    try:
-        tasks_lock_remove(primary, p.resolve())
-    except OSError:
-        pass
     name = Path(rel_norm).name
     rc_rm, _, _ = git(primary, "rm", "-f", "--ignore-unmatch", rel_norm)
     if rc_rm == 0:
@@ -2023,5 +2029,52 @@ def _move_completed_on_primary(cfg: AutoFocusConfig, rel: str) -> None:
             p.unlink()
         except OSError:
             pass
-    if not (prev.cleanup_pending if prev else False):
-        shutil.rmtree(sponte_job_task_dir(primary, cfg.task_id), ignore_errors=True)
+    task_still_on_disk = p.is_file()
+    cleanup_pending = task_still_on_disk or (bool(prev.cleanup_pending) if prev else False)
+    write_task_job_status(
+        primary,
+        TaskJobStatus(
+            task_id=cfg.task_id,
+            rel_task=rel_norm,
+            stage="completed",
+            owning_session_id="",
+            worktree_path="",
+            branch="",
+            task_title=(prev.task_title if prev else task_label(p)),
+            display_name=(prev.display_name if prev else ""),
+            ai_summary=(prev.ai_summary if prev else ""),
+            display_name_source=(prev.display_name_source if prev else ""),
+            naming_content_hash=(prev.naming_content_hash if prev else ""),
+            artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
+            completed=True,
+            cleanup_pending=cleanup_pending,
+        ),
+    )
+    try:
+        tasks_lock_remove(primary, p.resolve())
+    except OSError:
+        pass
+    if cleanup_pending:
+        return
+    job_dir = sponte_job_task_dir(primary, cfg.task_id)
+    shutil.rmtree(job_dir, ignore_errors=True)
+    if job_dir.is_dir():
+        write_task_job_status(
+            primary,
+            TaskJobStatus(
+                task_id=cfg.task_id,
+                rel_task=rel_norm,
+                stage="completed",
+                owning_session_id="",
+                worktree_path="",
+                branch="",
+                task_title=(prev.task_title if prev else task_label(p)),
+                display_name=(prev.display_name if prev else ""),
+                ai_summary=(prev.ai_summary if prev else ""),
+                display_name_source=(prev.display_name_source if prev else ""),
+                naming_content_hash=(prev.naming_content_hash if prev else ""),
+                artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
+                completed=True,
+                cleanup_pending=True,
+            ),
+        )
