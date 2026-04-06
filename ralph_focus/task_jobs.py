@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,10 +26,20 @@ class TaskJobStatus:
     branch: str = ""
     task_title: str = ""
     updated_at: str = ""
+    display_name: str = ""
+    ai_summary: str = ""
+    display_name_source: str = ""
+    completed: bool = False
+    cleanup_pending: bool = False
+    review_required: bool = False
+    naming_content_hash: str = ""
+    artifacts: list[dict[str, str]] = field(default_factory=list)
 
     def to_json_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["updated_at"] = _utc_now()
+        if not d.get("artifacts"):
+            d.pop("artifacts", None)
         return d
 
 
@@ -72,6 +82,14 @@ def read_task_job_status(repo: Path, task_id: str) -> TaskJobStatus | None:
     if not isinstance(raw, dict):
         return None
     try:
+        arts: list[dict[str, str]] = []
+        raw_arts = raw.get("artifacts")
+        if isinstance(raw_arts, list):
+            for item in raw_arts:
+                if isinstance(item, dict):
+                    kd = {str(k): str(v) for k, v in item.items() if isinstance(k, str)}
+                    if kd:
+                        arts.append(kd)
         return TaskJobStatus(
             schema_version=int(raw.get("schema_version", 1)),
             task_id=str(raw.get("task_id", "")),
@@ -82,6 +100,14 @@ def read_task_job_status(repo: Path, task_id: str) -> TaskJobStatus | None:
             branch=str(raw.get("branch", "")),
             task_title=str(raw.get("task_title", "")),
             updated_at=str(raw.get("updated_at", "")),
+            display_name=str(raw.get("display_name", "")),
+            ai_summary=str(raw.get("ai_summary", "")),
+            display_name_source=str(raw.get("display_name_source", "")),
+            completed=bool(raw.get("completed", False)),
+            cleanup_pending=bool(raw.get("cleanup_pending", False)),
+            review_required=bool(raw.get("review_required", False)),
+            naming_content_hash=str(raw.get("naming_content_hash", "")),
+            artifacts=arts,
         )
     except (TypeError, ValueError):
         return None
