@@ -60,6 +60,8 @@ def render_prompt(
     verify_commands: str = "",
     claimed_tasks_snapshot: str = "",
     backlog_candidates: str = "",
+    task_body_excerpt: str = "",
+    naming_reply_path: str = "",
 ) -> str:
     return substitute(
         load_prompt_for_workspace(name, primary),
@@ -69,6 +71,8 @@ def render_prompt(
         verify_commands=verify_commands,
         claimed_tasks_snapshot=claimed_tasks_snapshot,
         backlog_candidates=backlog_candidates,
+        task_body_excerpt=task_body_excerpt,
+        naming_reply_path=naming_reply_path,
     )
 
 
@@ -81,6 +85,8 @@ def substitute(
     verify_commands: str = "",
     claimed_tasks_snapshot: str = "",
     backlog_candidates: str = "",
+    task_body_excerpt: str = "",
+    naming_reply_path: str = "",
 ) -> str:
     return (
         template.replace("__TASK_FILE__", task_rel)
@@ -93,4 +99,6 @@ def substitute(
         .replace("__VERIFY_COMMANDS__", verify_commands)
         .replace("__CLAIMED_TASKS__", claimed_tasks_snapshot)
         .replace("__BACKLOG_CANDIDATES__", backlog_candidates)
+        .replace("__TASK_BODY_EXCERPT__", task_body_excerpt)
+        .replace("__NAMING_REPLY_PATH__", naming_reply_path)
     )
