@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import secrets
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +24,7 @@ from config.commands import (
 from config.defaults import (
     AGENT_PICK_LOCK_TIMEOUT_SEC,
     CONFLICT_ROUNDS_MAX,
+    MERGE_LOCK_TIMEOUT_SEC,
     GIT_IDENTITY_EMAIL,
     GIT_IDENTITY_NAME,
     IMPLEMENT_ROUNDS_MAX,
@@ -46,11 +49,13 @@ from ralph_focus.parallel_locks import (
     merge_phase_locked,
     try_acquire_task_lock,
 )
+from ralph_focus.repo_merge_lock import RepoMergeLockTimeoutError, repo_merge_lock_held
 from ralph_focus.paths import (
     agent_pick_lock_path,
     auto_focus_logs_dir,
     base_sha_file,
     base_task_file,
+    naming_reply_file,
     next_task_file,
     plan_file_for_task,
     plans_dir,
@@ -58,6 +63,8 @@ from ralph_focus.paths import (
     readable_base_sha_file,
     rotation_handoff_file,
     sanitize_job_segment,
+    sponte_job_task_dir,
+    sponte_tracked_task_artifacts_dir,
     worktrees_base,
     workspace_task_claim_lock_path,
 )
@@ -95,17 +102,24 @@ from ralph_focus.task_lifecycle import (
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
 from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
 from ralph_focus.tasks import (
-    compute_task_id,
     concrete_task_rel,
     count_checklist,
     format_pending_backlog_for_prompt,
+    naming_content_hash,
     normalize_task_path,
     normalize_task_rel,
+    pending_selectable_task_paths,
     task_has_pending,
+    task_id_from_resolved_path,
     task_label,
-    task_stage,
-    task_with_stage,
 )
+from ralph_focus.tasks_lock_registry import (
+    path_is_tasks_locked,
+    tasks_lock_append,
+    tasks_lock_prune_missing,
+    tasks_lock_remove,
+)
+from ralph_focus.workspace_settings import load_workspace_settings
 
 ProgressMode = Literal["off", "on", "full"]
 
@@ -379,7 +393,7 @@ def _release_task_lock(cfg: AutoFocusConfig) -> None:
 
 
 def _try_workspace_claim_lock(cfg: AutoFocusConfig, primary: Path, task_abs: Path) -> bool:
-    tid = compute_task_id(task_stem=task_abs.stem, task_title=task_label(task_abs))
+    tid = task_id_from_resolved_path(task_abs)
     wlp = workspace_task_claim_lock_path(primary, tid)
     if not try_acquire_task_lock(wlp):
         return False
@@ -402,6 +416,7 @@ def _sync_job_status_files(
     tp = wt_path / rel_task
     if tp.is_file():
         title = task_label(tp)
+    prev = read_task_job_status(cfg.primary, cfg.task_id)
     write_task_job_status(
         cfg.primary,
         TaskJobStatus(
@@ -411,7 +426,15 @@ def _sync_job_status_files(
             owning_session_id=cfg.runner_id,
             worktree_path=str(wt_path),
             branch=br_name,
-            task_title=title,
+            task_title=title or (prev.task_title if prev else ""),
+            display_name=(prev.display_name if prev else ""),
+            ai_summary=(prev.ai_summary if prev else ""),
+            display_name_source=(prev.display_name_source if prev else ""),
+            naming_content_hash=(prev.naming_content_hash if prev else ""),
+            artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
+            completed=bool(prev.completed) if prev else False,
+            cleanup_pending=bool(prev.cleanup_pending) if prev else False,
+            review_required=bool(prev.review_required) if prev else False,
         ),
     )
     write_session_job_status(
@@ -438,32 +461,16 @@ def _finalize_review_required(
 ) -> int:
     primary = cfg.primary
     _append_phase_log(logf, "REVIEW_REQUIRED_MAX_PHASE_ROUNDS")
-    rel = concrete_task_rel(wt_path, rel_task)
     new_rel = rel_task
-    if task_stage(rel) == "in-progress":
-        name = Path(rel).name
-        dest = task_with_stage(rel, "review-required")
-        (wt_path / dest).parent.mkdir(parents=True, exist_ok=True)
-        rc, _, err = git(wt_path, "mv", rel, dest)
-        if rc != 0:
-            _append_diagnostic_log(logf, "REVIEW_REQUIRED: git mv failed", err or "")
-            return 1
-        msg = truncate_subject(f"review-required {name}", prefix="chore(tasks): ", max_total=50)
-        git(
-            wt_path,
-            "-c",
-            f"user.name={GIT_IDENTITY_NAME}",
-            "-c",
-            f"user.email={GIT_IDENTITY_EMAIL}",
-            "commit",
-            "-m",
-            msg,
-        )
-        new_rel = dest
+    try:
+        tasks_lock_remove(primary, (primary / new_rel).resolve())
+    except OSError:
+        pass
     title = ""
     tp = wt_path / new_rel
     if tp.is_file():
         title = task_label(tp)
+    prev = read_task_job_status(primary, cfg.task_id)
     write_task_job_status(
         primary,
         TaskJobStatus(
@@ -474,6 +481,12 @@ def _finalize_review_required(
             worktree_path=str(wt_path),
             branch=br_name,
             task_title=title,
+            display_name=(prev.display_name if prev else ""),
+            ai_summary=(prev.ai_summary if prev else ""),
+            display_name_source=(prev.display_name_source if prev else ""),
+            naming_content_hash=(prev.naming_content_hash if prev else ""),
+            artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
+            review_required=True,
         ),
     )
     write_session_job_status(
@@ -728,6 +741,12 @@ def abandon_auto_pick_cycle_on_failure(
 
     clear_resume(primary, runner_id=cfg.runner_id)
 
+    if rel_for_backlog:
+        try:
+            tasks_lock_remove(primary, (primary / rel_for_backlog).resolve())
+        except OSError:
+            pass
+
     if wt_path is not None and wt_path.is_dir() and worktree_registered(primary, wt_path):
         git(primary, "worktree", "remove", "-f", str(wt_path))
 
@@ -856,7 +875,7 @@ def run_one_cycle(
         if not cfg.task_id:
             tpath = wt_path / rel_task
             if tpath.is_file():
-                cfg.task_id = compute_task_id(task_stem=tpath.stem, task_title=task_label(tpath))
+                cfg.task_id = task_id_from_resolved_path((primary / concrete_task_rel(primary, rel_task)).resolve())
         touch_session_job_folder(primary, cfg.runner_id)
         oc, dc = count_checklist(wt_path / rel_task)
         label = task_label(wt_path / rel_task)
@@ -916,11 +935,12 @@ def run_one_cycle(
             session_id=cfg.runner_id,
             rel_task=task_rel,
         )
-        claimed = _claim_task_in_worktree(wt_path, task_rel, logf)
+        claimed = _claim_task_on_primary(cfg, task_abs, task_rel, logf)
         if claimed is None:
             _release_task_lock(cfg)
             return 1
         rel_task = claimed
+        _maybe_refresh_task_display_name(cfg, wt_path, rel_task, logf)
         plan_path = plan_file_for_task(primary, Path(rel_task).stem)
         plan_rel = plan_path.resolve().as_posix()
         plans_dir(primary).mkdir(parents=True, exist_ok=True)
@@ -1199,7 +1219,15 @@ def run_one_cycle(
 
     if phase in ("MERGE", "MERGE_CONFLICT", "PRIMARY_PREMERGE"):
         try:
-            with merge_phase_locked(primary, main_ref):
+            with (
+                merge_phase_locked(primary, main_ref),
+                repo_merge_lock_held(
+                    primary,
+                    cfg.runner_id,
+                    load_workspace_settings(primary).resolved_merge_backoff(),
+                    float(MERGE_LOCK_TIMEOUT_SEC),
+                ),
+            ):
                 # Resume at MERGE skips PRIORITIES (and its post-phase commit). Any dirty worktree
                 # would block merge — commit pending changes here too.
                 merge_dirty_before = not worktree_clean(wt_path)
@@ -1445,6 +1473,7 @@ def run_one_cycle(
                     if merge_rc != 0:
                         return 1
 
+                _archive_recorded_artifacts(cfg, wt_path)
                 rc_rm, _, _ = git(primary, "worktree", "remove", str(wt_path))
                 if rc_rm != 0 or wt_path.exists():
                     git(primary, "worktree", "remove", "-f", str(wt_path))
@@ -1463,7 +1492,7 @@ def run_one_cycle(
                     primary,
                     runner_id=cfg.runner_id,
                 )
-                _move_completed_on_primary(primary, rel_task)
+                _move_completed_on_primary(cfg, rel_task)
                 _release_task_lock(cfg)
                 cfg.stats.cycles_completed += 1
                 cfg.current_wt_path = None
@@ -1488,6 +1517,17 @@ def run_one_cycle(
                     },
                 )
                 return 0
+        except RepoMergeLockTimeoutError as e:
+            _append_diagnostic_log(
+                logf,
+                "MERGE: timed out waiting for .sponte/locks/merge.lock",
+                str(e),
+            )
+            merge_precheck_failed(
+                "Another session holds the workspace merge lock for too long.",
+                "Wait and retry, or remove a stale `.sponte/locks/merge.lock` if safe.",
+            )
+            return 1
         except LockWaitTimeoutError as e:
             _append_diagnostic_log(
                 logf,
@@ -1555,6 +1595,10 @@ def _persist(
 
 def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
     primary = cfg.primary
+    try:
+        tasks_lock_prune_missing(primary)
+    except OSError:
+        pass
 
     def _take_task_and_claim_lock(task_abs: Path) -> bool:
         if not _try_workspace_claim_lock(cfg, primary, task_abs):
@@ -1565,6 +1609,8 @@ def _select_next_task_abs(cfg: AutoFocusConfig) -> tuple[int, Path | None]:
         p = normalize_task_path(primary, cfg.task_arg)
         if not p.is_file():
             return (1, None)
+        if path_is_tasks_locked(primary, p):
+            return (2, None)
         if not task_has_pending(p):
             return (1, None)
         if not _take_task_and_claim_lock(p):
@@ -1614,16 +1660,129 @@ def _agent_pick_backlog_task(cfg: AutoFocusConfig) -> Path | None:
     _append_phase_log(logf, "AGENT_PICK_TASK")
     if cfg._run_agent(primary, cfg.plan_model, body, logf, "AGENT_PICK_TASK") != 0:
         return None
+    if cfg.progress != "off":
+        _print_selectable_tasks_table(cfg)
     if not nf.is_file():
         return None
     line = nf.read_text(encoding="utf-8", errors="replace").splitlines()[0].strip()
     line = concrete_task_rel(primary, line)
-    if task_stage(line) != "backlog":
-        return None
-    abs_p = primary / line
+    abs_p = normalize_task_path(primary, line)
     if not abs_p.is_file() or not task_has_pending(abs_p):
         return None
+    if path_is_tasks_locked(primary, abs_p):
+        return None
     return abs_p
+
+
+def _print_selectable_tasks_table(cfg: AutoFocusConfig) -> None:
+    from rich.console import Console
+    from rich.table import Table
+
+    t = Table(title="Selectable tasks (pending, not path-locked)")
+    t.add_column("rel_path")
+    t.add_column("task_id")
+    t.add_column("display_name")
+    for p in sorted(pending_selectable_task_paths(cfg.primary)):
+        tid = task_id_from_resolved_path(p)
+        st = read_task_job_status(cfg.primary, tid)
+        t.add_row(
+            p.relative_to(cfg.primary).as_posix(),
+            tid,
+            (st.display_name if st and st.display_name else task_label(p)),
+        )
+    Console().print(t)
+
+
+def _maybe_refresh_task_display_name(
+    cfg: AutoFocusConfig,
+    wt_path: Path,
+    rel_task: str,
+    logf: Path,
+) -> None:
+    tpath = wt_path / rel_task
+    if not tpath.is_file():
+        return
+    text = tpath.read_text(encoding="utf-8", errors="replace")
+    nh = naming_content_hash(text)
+    prev = read_task_job_status(cfg.primary, cfg.task_id)
+    if prev is not None and prev.naming_content_hash == nh and (prev.display_name or "").strip():
+        return
+    out = naming_reply_file(cfg.primary, cfg.task_id)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.unlink(missing_ok=True)
+    excerpt = text[:6000]
+    body = render_prompt(
+        "task_display_name",
+        primary=cfg.primary,
+        task_rel=rel_task,
+        plan_rel="",
+        task_body_excerpt=excerpt,
+        naming_reply_path=str(out),
+    )
+    rc = cfg._run_agent(wt_path, cfg.plan_model, body, logf, "TASK_DISPLAY_NAME")
+    label = task_label(tpath)
+    display_name = (label or Path(rel_task).stem)[:60]
+    ai_summary = ""
+    source = "fallback"
+    if rc == 0 and out.is_file():
+        try:
+            raw = json.loads(out.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(raw, dict):
+                dn = str(raw.get("display_name", "")).strip()
+                sm = str(raw.get("ai_summary", "")).strip()
+                if dn:
+                    display_name = dn[:60]
+                    source = "ai"
+                if sm:
+                    ai_summary = sm[:160]
+        except (json.JSONDecodeError, TypeError, OSError):
+            pass
+    base = prev or TaskJobStatus(task_id=cfg.task_id, rel_task=rel_task)
+    write_task_job_status(
+        cfg.primary,
+        TaskJobStatus(
+            task_id=cfg.task_id,
+            rel_task=rel_task,
+            stage=base.stage or "in-progress",
+            owning_session_id=cfg.runner_id,
+            worktree_path=str(cfg.current_wt_path or ""),
+            branch=base.branch,
+            task_title=label,
+            display_name=display_name,
+            ai_summary=ai_summary,
+            display_name_source=source,
+            naming_content_hash=nh,
+            artifacts=list(base.artifacts) if base.artifacts else [],
+        ),
+    )
+
+
+def _claim_task_on_primary(cfg: AutoFocusConfig, task_abs: Path, rel_task: str, logf: Path) -> str | None:
+    try:
+        tasks_lock_append(cfg.primary, task_abs)
+    except OSError as exc:
+        _append_diagnostic_log(logf, "CLAIM: tasks.lock append failed", str(exc))
+        return None
+    return rel_task
+
+
+def _archive_recorded_artifacts(cfg: AutoFocusConfig, wt_path: Path) -> None:
+    st = read_task_job_status(cfg.primary, cfg.task_id)
+    if st is None or not st.artifacts:
+        return
+    dest_root = sponte_tracked_task_artifacts_dir(cfg.primary, cfg.task_id)
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for ent in st.artifacts:
+        src_rel = (ent.get("source_rel") or "").strip()
+        archive_name = (ent.get("archive_name") or "").strip()
+        if not src_rel or not archive_name:
+            continue
+        src = wt_path / src_rel
+        if src.is_file():
+            try:
+                shutil.copy2(src, dest_root / archive_name)
+            except OSError:
+                pass
 
 
 def _record_base(primary: Path, wt: Path, task_rel: str) -> None:
@@ -1633,35 +1792,6 @@ def _record_base(primary: Path, wt: Path, task_rel: str) -> None:
     if code == 0:
         base_sha_file(primary).write_text(out.strip(), encoding="utf-8")
     base_task_file(primary).write_text(task_rel + "\n", encoding="utf-8")
-
-
-def _claim_task_in_worktree(wt: Path, rel: str, logf: Path) -> str | None:
-    rel = concrete_task_rel(wt, rel)
-    if task_stage(rel) != "backlog":
-        return rel
-    name = Path(rel).name
-    dest = task_with_stage(rel, "in-progress")
-    (wt / dest).parent.mkdir(parents=True, exist_ok=True)
-    src = wt / rel
-    if not src.is_file():
-        return None
-    rc, _, err = git(wt, "mv", rel, dest)
-    if rc != 0:
-        with logf.open("a", encoding="utf-8") as lf:
-            lf.write(err)
-        return None
-    msg = truncate_subject(f"claim {name}", prefix="chore(tasks): ", max_total=50)
-    git(
-        wt,
-        "-c",
-        f"user.name={GIT_IDENTITY_NAME}",
-        "-c",
-        f"user.email={GIT_IDENTITY_EMAIL}",
-        "commit",
-        "-m",
-        msg,
-    )
-    return dest
 
 
 def _auto_finalize_task_branch(primary: Path, wt: Path, rel_task: str) -> None:
@@ -1845,25 +1975,53 @@ def _resolve_merge_with_agent(
     return 1
 
 
-def _move_completed_on_primary(primary: Path, rel: str) -> None:
-    rel = concrete_task_rel(primary, rel)
-    if task_stage(rel) != "in-progress":
-        return
-    p = primary / rel
+def _move_completed_on_primary(cfg: AutoFocusConfig, rel: str) -> None:
+    primary = cfg.primary
+    rel_norm = concrete_task_rel(primary, rel)
+    p = primary / rel_norm
     if not p.is_file() or task_has_pending(p):
         return
-    name = Path(rel).name
-    dest = task_with_stage(rel, "completed")
-    (primary / dest).parent.mkdir(parents=True, exist_ok=True)
-    git(primary, "mv", rel, dest)
-    msg = truncate_subject(f"complete {name}", prefix="chore(tasks): ", max_total=50)
-    git(
+    prev = read_task_job_status(primary, cfg.task_id)
+    write_task_job_status(
         primary,
-        "-c",
-        f"user.name={GIT_IDENTITY_NAME}",
-        "-c",
-        f"user.email={GIT_IDENTITY_EMAIL}",
-        "commit",
-        "-m",
-        msg,
+        TaskJobStatus(
+            task_id=cfg.task_id,
+            rel_task=rel_norm,
+            stage="completed",
+            owning_session_id="",
+            worktree_path="",
+            branch="",
+            task_title=(prev.task_title if prev else task_label(p)),
+            display_name=(prev.display_name if prev else ""),
+            ai_summary=(prev.ai_summary if prev else ""),
+            display_name_source=(prev.display_name_source if prev else ""),
+            naming_content_hash=(prev.naming_content_hash if prev else ""),
+            artifacts=list(prev.artifacts) if prev and prev.artifacts else [],
+            completed=True,
+        ),
     )
+    try:
+        tasks_lock_remove(primary, p.resolve())
+    except OSError:
+        pass
+    name = Path(rel_norm).name
+    rc_rm, _, _ = git(primary, "rm", "-f", "--ignore-unmatch", rel_norm)
+    if rc_rm == 0:
+        msg = truncate_subject(f"complete {name}", prefix="chore(tasks): ", max_total=50)
+        git(
+            primary,
+            "-c",
+            f"user.name={GIT_IDENTITY_NAME}",
+            "-c",
+            f"user.email={GIT_IDENTITY_EMAIL}",
+            "commit",
+            "-m",
+            msg,
+        )
+    else:
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    if not (prev.cleanup_pending if prev else False):
+        shutil.rmtree(sponte_job_task_dir(primary, cfg.task_id), ignore_errors=True)
