@@ -69,8 +69,10 @@ GIT_IDENTITY_EMAIL: str = "ralph-auto-focus@localhost"
 
 # --- Progress ---
 DEFAULT_PROGRESS: str = "on"  # off | on | full
+# Default allows long quiet stretches during agent shell tools (e.g. pnpm install / turbo check)
+# without stream-json lines; still bounded by TOTAL_RUNTIME_TIMEOUT_SEC in the agent harness.
 STREAM_STALL_TIMEOUT_SEC: float = float(
-    os.environ.get("RALPH_AUTO_FOCUS_STREAM_STALL_TIMEOUT_SEC", "120")
+    os.environ.get("RALPH_AUTO_FOCUS_STREAM_STALL_TIMEOUT_SEC", "900")
 )
 TOTAL_RUNTIME_TIMEOUT_SEC: float = float(
     os.environ.get("RALPH_AUTO_FOCUS_TOTAL_RUNTIME_TIMEOUT_SEC", "1800")

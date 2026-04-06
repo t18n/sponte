@@ -340,6 +340,10 @@ class AutoFocusConfig:
                     token_estimated=live_usage_estimated,
                 )
 
+        stall_timeout_sec = STREAM_STALL_TIMEOUT_SEC if STREAM_STALL_TIMEOUT_SEC > 0 else None
+        total_runtime_timeout_sec = TOTAL_RUNTIME_TIMEOUT_SEC if TOTAL_RUNTIME_TIMEOUT_SEC > 0 else None
+        if stall_timeout_sec is not None and total_runtime_timeout_sec is not None:
+            stall_timeout_sec = min(stall_timeout_sec, total_runtime_timeout_sec)
         request = self.harness.prepare(
             RunRequest(
                 cwd=wt,
@@ -350,10 +354,8 @@ class AutoFocusConfig:
                 tee_output=tee,
                 metrics_out=metrics,
                 watchdog=RunWatchdog(
-                    stall_timeout_sec=STREAM_STALL_TIMEOUT_SEC if STREAM_STALL_TIMEOUT_SEC > 0 else None,
-                    total_runtime_timeout_sec=(
-                        TOTAL_RUNTIME_TIMEOUT_SEC if TOTAL_RUNTIME_TIMEOUT_SEC > 0 else None
-                    ),
+                    stall_timeout_sec=stall_timeout_sec,
+                    total_runtime_timeout_sec=total_runtime_timeout_sec,
                 ),
                 event_callback=handle_run_event if self.progress != "off" else None,
             )
