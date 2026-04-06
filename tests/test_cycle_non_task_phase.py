@@ -4,10 +4,12 @@ from pathlib import Path
 import pytest
 
 from config.defaults import LEGACY_TASKS_DIR, TASKS_DIR
+from ralph_focus.run_events import RunEvent
 from ralph_focus.contracts import AvailabilityReport, FailureContext, HarnessCapabilities, RunRequest, RunResult
 from ralph_focus.cycle import AutoFocusConfig, _agent_pick_backlog_task, _run_non_task_phase_agent
 from ralph_focus.paths import plan_file_for_task
 from ralph_focus.failure_detection import FailureKind, classify_agent_failure
+from ralph_focus.resume import ResumeState, load_resume, write_resume
 
 
 class _DummyHarness:
@@ -21,6 +23,7 @@ class _DummyHarness:
         exc: OSError | None = None,
         capabilities: HarnessCapabilities | None = None,
         prepare_model_suffix: str = "",
+        on_run=None,
     ) -> None:
         self.id = harness_id
         self.display_name = harness_id.title()
@@ -30,6 +33,7 @@ class _DummyHarness:
         self._log_text = log_text
         self._exc = exc
         self._prepare_model_suffix = prepare_model_suffix
+        self._on_run = on_run
         self.prepared_requests: list[RunRequest] = []
         self.run_requests: list[RunRequest] = []
 
@@ -46,6 +50,8 @@ class _DummyHarness:
         self.run_requests.append(request)
         if self._exc is not None:
             raise self._exc
+        if self._on_run is not None:
+            self._on_run(request)
         if self._log_text:
             request.log_file.write_text(self._log_text, encoding="utf-8")
         return RunResult(exit_code=self._rc, usage=self._usage)
@@ -89,7 +95,47 @@ def test_run_agent_uses_harness_capabilities_and_prepare(tmp_path: Path) -> None
     assert harness.prepared_requests[0].use_stream_json is False
     assert harness.prepared_requests[0].tee_output is False
     assert harness.prepared_requests[0].metrics_out is None
+    assert harness.prepared_requests[0].watchdog is not None
+    assert harness.prepared_requests[0].watchdog.stall_timeout_sec is not None
+    assert harness.prepared_requests[0].watchdog.total_runtime_timeout_sec is not None
     assert harness.run_requests[0].model == "executor-prepared"
+
+
+def test_run_agent_updates_phase_tokens_from_live_events(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from ralph_focus import cycle
+
+    token_totals: list[tuple[int | None, bool]] = []
+
+    def fake_phase_bar(*_args, token_total=None, token_estimated=False, **_kwargs):
+        token_totals.append((token_total, token_estimated))
+
+    monkeypatch.setattr(cycle, "phase_bar", fake_phase_bar)
+    monkeypatch.setattr(cycle, "step_done", lambda *_args, **_kwargs: None)
+
+    def emit_live_usage(request: RunRequest) -> None:
+        assert request.event_callback is not None
+        request.event_callback(
+            RunEvent(kind="usage", usage_delta={"input_tokens": 7, "output_tokens": 3}, estimated=False)
+        )
+
+    harness = _DummyHarness(
+        harness_id="cursor",
+        rc=0,
+        usage={"input_tokens": 7, "output_tokens": 3},
+        on_run=emit_live_usage,
+    )
+    cfg = AutoFocusConfig(
+        primary=tmp_path,
+        harness=harness,
+        plan_model="planner",
+        execute_model="executor",
+        progress="on",
+    )
+
+    rc = cfg._run_agent(tmp_path, "executor", "prompt", tmp_path / "run.log", "IMPLEMENT_1")
+
+    assert rc == 0
+    assert token_totals == [(0, False), (10, False)]
 
 
 def test_non_task_phase_returns_rotate_when_threshold_reached(tmp_path: Path) -> None:
@@ -111,6 +157,51 @@ def test_non_task_phase_returns_rotate_when_threshold_reached(tmp_path: Path) ->
     )
 
     assert rc == 3
+
+
+def test_non_task_phase_persists_live_token_totals_before_retry(tmp_path: Path) -> None:
+    def emit_live_usage(request: RunRequest) -> None:
+        assert request.event_callback is not None
+        request.event_callback(
+            RunEvent(kind="usage", usage_delta={"input_tokens": 7, "output_tokens": 3}, estimated=False)
+        )
+        request.log_file.write_text("sponte watchdog: cancelled run (stall_timeout)\n", encoding="utf-8")
+
+    state = ResumeState(
+        primary=str(tmp_path.resolve()),
+        phase="IMPLEMENT",
+        logf=str(tmp_path / "run.log"),
+        wt_path=str(tmp_path / "wt"),
+        rel_task=f"{TASKS_DIR}/in-progress/example.md",
+        total_tokens=5,
+    )
+    write_resume(tmp_path, state, runner_id="lane-a")
+
+    cfg = AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(rc=1, usage={}, on_run=emit_live_usage),
+        plan_model="planner",
+        execute_model="executor",
+        progress="on",
+        runner_id="lane-a",
+    )
+    cfg.stats.add_tokens({"total_tokens": 5})
+
+    rc = _run_non_task_phase_agent(
+        cfg,
+        cwd=tmp_path,
+        model="executor",
+        prompt_body="prompt",
+        logf=tmp_path / "run.log",
+        label="PRIMARY_PREMERGE_1",
+    )
+
+    loaded = load_resume(tmp_path, runner_id="lane-a")
+
+    assert rc == 1
+    assert loaded is not None
+    assert loaded.total_tokens == 15
+    assert cfg.last_failure_kind is FailureKind.TRANSIENT
 
 
 def test_non_task_phase_classifies_failures(tmp_path: Path) -> None:

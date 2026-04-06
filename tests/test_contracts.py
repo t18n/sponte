@@ -23,20 +23,58 @@ class DummyStrategy:
         use_stream_json: bool,
         tee: bool,
         metrics_out: Path | None,
-    ) -> tuple[int, dict[str, int]]:
-        self.calls.append((cwd, model, prompt, log_file, use_stream_json, tee, metrics_out))
-        return 7, {"input_tokens": 11, "output_tokens": 3}
+        watchdog,
+        event_callback,
+    ):
+        from ralph_focus.contracts import RunResult
+
+        self.calls.append((cwd, model, prompt, log_file, use_stream_json, tee, metrics_out, watchdog, event_callback))
+        return RunResult(exit_code=7, usage={"input_tokens": 11, "output_tokens": 3})
+
+
+def test_run_request_and_result_support_watchdog_and_observer(tmp_path: Path) -> None:
+    from ralph_focus.contracts import RunEvent, RunRequest, RunResult, RunWatchdog
+
+    seen: list[RunEvent] = []
+
+    watchdog = RunWatchdog(stall_timeout_sec=30.0, total_runtime_timeout_sec=300.0)
+    event = RunEvent(kind="usage", text="delta", usage_delta={"output_tokens": 8}, estimated=True)
+    request = RunRequest(
+        cwd=tmp_path,
+        model="auto",
+        prompt="hello",
+        log_file=tmp_path / "run.log",
+        watchdog=watchdog,
+        event_callback=seen.append,
+    )
+    result = RunResult(
+        exit_code=7,
+        usage={"input_tokens": 11, "output_tokens": 3},
+        retryable=True,
+        cancellation_reason="stall_timeout",
+    )
+
+    request.event_callback(event)
+
+    assert request.watchdog == watchdog
+    assert seen == [event]
+    assert result.retryable is True
+    assert result.cancellation_reason == "stall_timeout"
 
 
 def test_strategy_harness_adapter_exposes_stable_harness_surface(tmp_path: Path) -> None:
     from ralph_focus.contracts import (
+        RunEvent,
         RunRequest,
         RunResult,
+        RunWatchdog,
         StrategyHarnessAdapter,
     )
 
     strategy = DummyStrategy()
     harness = StrategyHarnessAdapter(strategy)
+    seen: list[RunEvent] = []
+    watchdog = RunWatchdog(stall_timeout_sec=30.0, total_runtime_timeout_sec=300.0)
     request = RunRequest(
         cwd=tmp_path,
         model="auto",
@@ -45,6 +83,8 @@ def test_strategy_harness_adapter_exposes_stable_harness_surface(tmp_path: Path)
         use_stream_json=True,
         tee_output=True,
         metrics_out=tmp_path / "metrics.txt",
+        watchdog=watchdog,
+        event_callback=seen.append,
     )
 
     availability = harness.availability()
@@ -69,6 +109,8 @@ def test_strategy_harness_adapter_exposes_stable_harness_surface(tmp_path: Path)
             True,
             True,
             tmp_path / "metrics.txt",
+            watchdog,
+            seen.append,
         )
     ]
 

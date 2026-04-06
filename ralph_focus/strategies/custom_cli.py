@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from ralph_focus.live_usage import with_live_usage_events
+from ralph_focus.stream_runtime import run_subprocess_streaming
 from ralph_focus.workspace_settings import CustomHarnessConfig
+
+if TYPE_CHECKING:
+    from ralph_focus.contracts import RunEventCallback, RunResult, RunWatchdog
 
 
 def _append_log(log_file: Path, chunk: str) -> None:
@@ -53,30 +58,34 @@ class CustomCLIStrategy:
         use_stream_json: bool,
         tee: bool,
         metrics_out: Path | None,
-    ) -> tuple[int, dict[str, int]]:
-        del use_stream_json, tee, metrics_out
+        watchdog: "RunWatchdog | None",
+        event_callback: "RunEventCallback | None",
+    ) -> "RunResult":
+        from ralph_focus.contracts import RunResult
+
+        del use_stream_json, metrics_out
         iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         header = f"\n======== {iso} custom harness model={model!r} ========\n"
         _append_log(log_file, header)
         env = os.environ.copy()
         env["SPONTE_MODEL"] = model
         cmd = [self._cfg.executable.strip(), *self._cfg.args, prompt]
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=cwd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=86_400,
-                shell=False,
-            )
-        except subprocess.TimeoutExpired:
-            _append_log(log_file, "custom harness: subprocess timed out (24h)\n")
-            return 1, {}
-        out = (proc.stdout or "") + (proc.stderr or "")
-        if out:
-            _append_log(log_file, out)
-            if not out.endswith("\n"):
-                _append_log(log_file, "\n")
-        return proc.returncode or 0, {}
+        live_event_callback = with_live_usage_events(
+            use_stream_json=False,
+            event_callback=event_callback,
+        )
+        result = run_subprocess_streaming(
+            cmd,
+            cwd=cwd,
+            env=env,
+            log_file=log_file,
+            tee=tee,
+            watchdog=watchdog,
+            event_callback=live_event_callback,
+        )
+        return RunResult(
+            exit_code=result.exit_code,
+            usage={},
+            retryable=result.retryable,
+            cancellation_reason=result.cancellation_reason,
+        )

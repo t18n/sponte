@@ -65,6 +65,12 @@ GIT_IDENTITY_EMAIL: str = "ralph-auto-focus@localhost"
 
 # --- Progress ---
 DEFAULT_PROGRESS: str = "on"  # off | on | full
+STREAM_STALL_TIMEOUT_SEC: float = float(
+    os.environ.get("RALPH_AUTO_FOCUS_STREAM_STALL_TIMEOUT_SEC", "120")
+)
+TOTAL_RUNTIME_TIMEOUT_SEC: float = float(
+    os.environ.get("RALPH_AUTO_FOCUS_TOTAL_RUNTIME_TIMEOUT_SEC", "1800")
+)
 
 # --- Codex CLI ---
 CODEX_EXECUTABLE: str = os.environ.get("RALPH_CODEX_BIN", "codex")

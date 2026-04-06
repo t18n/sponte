@@ -6,23 +6,24 @@ def test_amp_strategy_defaults_to_least_privilege(monkeypatch, tmp_path: Path) -
 
     seen: dict[str, object] = {}
 
-    def fake_run(args: list[str], *, cwd: Path, capture_output: bool, text: bool):
+    class _Result:
+        exit_code = 0
+        retryable = False
+        cancellation_reason = ""
+
+    def fake_run(args: list[str], *, cwd: Path, log_file: Path, tee: bool, watchdog, event_callback):
         seen["args"] = args
         seen["cwd"] = cwd
-        seen["capture_output"] = capture_output
-        seen["text"] = text
-
-        class _Completed:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-
-        return _Completed()
+        seen["log_file"] = log_file
+        seen["tee"] = tee
+        seen["watchdog"] = watchdog
+        seen["event_callback"] = event_callback
+        return _Result()
 
     monkeypatch.delenv("RALPH_AMP_DANGEROUSLY_ALLOW_ALL", raising=False)
-    monkeypatch.setattr("ralph_focus.strategies.amp.subprocess.run", fake_run)
+    monkeypatch.setattr("ralph_focus.strategies.amp.run_subprocess_streaming", fake_run)
 
-    rc, usage = AmpStrategy().run(
+    result = AmpStrategy().run(
         tmp_path,
         "sonnet",
         "do the thing",
@@ -30,8 +31,10 @@ def test_amp_strategy_defaults_to_least_privilege(monkeypatch, tmp_path: Path) -
         use_stream_json=False,
         tee=False,
         metrics_out=None,
+        watchdog=None,
+        event_callback=None,
     )
 
-    assert rc == 0
-    assert usage == {}
+    assert result.exit_code == 0
+    assert result.usage == {}
     assert "--dangerously-allow-all" not in seen["args"]

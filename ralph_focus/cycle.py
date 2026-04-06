@@ -33,7 +33,9 @@ from config.defaults import (
     RESUME_SCHEMA_VERSION,
     ROTATE_THRESHOLD_TOKENS,
     ROTATE_WARN_THRESHOLD_TOKENS,
+    STREAM_STALL_TIMEOUT_SEC,
     TASKS_DIR,
+    TOTAL_RUNTIME_TIMEOUT_SEC,
 )
 from ralph_focus.contracts import FailureContext, Harness, RunRequest
 from ralph_focus.harness_resolve import resolve_harness
@@ -83,7 +85,8 @@ from ralph_focus.progress import (
     task_block,
 )
 from ralph_focus.prompts import render_prompt
-from ralph_focus.resume import ResumeState, clear_resume, load_resume, write_resume
+from ralph_focus.run_events import RunWatchdog
+from ralph_focus.resume import ResumeState, clear_resume, load_resume, update_resume_runtime_state, write_resume
 from ralph_focus.session_stats import SessionStats, _usage_rotation_tokens
 from ralph_focus.task_jobs import (
     SessionJobStatus,
@@ -309,9 +312,33 @@ class AutoFocusConfig:
         use_json = self.progress != "off" and self.harness.capabilities.supports_stream_json
         tee = self.progress == "full" and self.harness.capabilities.supports_tee_output
         metrics: Path | None = None
+        live_usage: dict[str, int] = {}
+        live_usage_estimated = False
         self.last_agent_error_detail = ""
         if self.progress != "off" and use_json and self.harness.capabilities.supports_metrics_output:
             metrics = logf.parent / f".metrics-{secrets.token_hex(4)}.txt"
+
+        def handle_run_event(event) -> None:
+            nonlocal live_usage_estimated
+            if event.kind != "usage" or not event.usage_delta:
+                return
+            for key, value in event.usage_delta.items():
+                live_usage[key] = live_usage.get(key, 0) + int(value)
+            live_usage_estimated = live_usage_estimated or event.estimated
+            if self.progress != "off":
+                phase_bar(
+                    self.progress_agent_step,
+                    max_agent_steps(
+                        self.implement_rounds_max,
+                        self.improve_implement_max,
+                        self.conflict_rounds_max,
+                    ),
+                    label,
+                    model=model,
+                    token_total=self.stats.rotation_tokens() + _usage_rotation_tokens(live_usage),
+                    token_estimated=live_usage_estimated,
+                )
+
         request = self.harness.prepare(
             RunRequest(
                 cwd=wt,
@@ -321,6 +348,13 @@ class AutoFocusConfig:
                 use_stream_json=use_json,
                 tee_output=tee,
                 metrics_out=metrics,
+                watchdog=RunWatchdog(
+                    stall_timeout_sec=STREAM_STALL_TIMEOUT_SEC if STREAM_STALL_TIMEOUT_SEC > 0 else None,
+                    total_runtime_timeout_sec=(
+                        TOTAL_RUNTIME_TIMEOUT_SEC if TOTAL_RUNTIME_TIMEOUT_SEC > 0 else None
+                    ),
+                ),
+                event_callback=handle_run_event if self.progress != "off" else None,
             )
         )
         t0 = time.monotonic()
@@ -344,7 +378,14 @@ class AutoFocusConfig:
         except OSError as exc:
             rc, usage = 1, {}
             self.last_agent_error_detail = f"{type(exc).__name__}: {exc}"
-        self.stats.add_tokens(usage)
+        committed_usage = usage or live_usage
+        self.stats.add_tokens(committed_usage)
+        update_resume_runtime_state(
+            self.primary,
+            runner_id=self.runner_id,
+            total_tokens=self.stats.rotation_tokens(),
+            token_warning_emitted=self.token_warning_emitted,
+        )
         wall = time.monotonic() - t0
         self.stats.add_step_wall(wall)
         summary = f"wall_s={wall:.1f}"
@@ -354,7 +395,13 @@ class AutoFocusConfig:
             summary = metrics.read_text(encoding="utf-8", errors="replace")[:800] + f"; wall_s={wall:.1f}"
             metrics.unlink(missing_ok=True)
         if self.progress != "off":
-            step_done(label, summary, model=model, token_total=self.stats.rotation_tokens())
+            step_done(
+                label,
+                summary,
+                model=model,
+                token_total=self.stats.rotation_tokens(),
+                token_estimated=bool(not usage and committed_usage and live_usage_estimated),
+            )
         return rc
 
     def _sub(self, name: str, rel_task: str, plan_rel: str) -> str:
@@ -865,10 +912,10 @@ def run_one_cycle(
         cfg.session_deadline_epoch = st.session_deadline_epoch or cfg.session_deadline_epoch
         cfg.current_wt_path = wt_path
         # Rotation is scoped to the current resumed process, not cumulative history.
-        cfg.stats.total_token_count = 0
-        cfg.stats.rotation_token_count = 0
+        cfg.stats.total_token_count = st.total_tokens
+        cfg.stats.rotation_token_count = st.total_tokens
         cfg.no_progress_loops = st.no_progress_loops
-        cfg.token_warning_emitted = False
+        cfg.token_warning_emitted = st.token_warning_emitted.lower() == "true"
         handoff_path = rotation_handoff_file(primary, runner_id=cfg.runner_id)
         cfg.resume_handoff = handoff_path.read_text(encoding="utf-8", errors="replace") if handoff_path.is_file() else ""
         handoff_path.unlink(missing_ok=True)

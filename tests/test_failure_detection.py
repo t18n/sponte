@@ -19,6 +19,16 @@ def test_timeout_and_rate_limit_errors_are_transient() -> None:
     assert rate_limited.kind is FailureKind.TRANSIENT
 
 
+def test_watchdog_timeout_errors_are_transient() -> None:
+    result = classify_agent_failure(
+        "agent failed",
+        "sponte watchdog: cancelled run (stall_timeout)",
+        no_progress_streak=0,
+    )
+
+    assert result.kind is FailureKind.TRANSIENT
+
+
 def test_no_space_left_on_device_is_transient() -> None:
     result = classify_agent_failure(
         "agent failed",

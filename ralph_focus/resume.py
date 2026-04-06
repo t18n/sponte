@@ -119,6 +119,27 @@ def clear_resume(
     resume_file_legacy(primary, runner_id=runner_id).unlink(missing_ok=True)
 
 
+def update_resume_runtime_state(
+    primary: Path,
+    *,
+    runner_id: str = "default",
+    total_tokens: int | None = None,
+    token_warning_emitted: bool | None = None,
+) -> None:
+    state = load_resume(primary, runner_id=runner_id)
+    if state is None:
+        return
+    updated = state
+    if total_tokens is not None:
+        updated = replace(updated, total_tokens=int(total_tokens))
+    if token_warning_emitted is not None:
+        updated = replace(
+            updated,
+            token_warning_emitted="true" if token_warning_emitted else "false",
+        )
+    write_resume(primary, updated, runner_id=runner_id)
+
+
 def _parse_export_line(line: str) -> tuple[str, str] | None:
     line = line.strip()
     if not line.startswith("export "):

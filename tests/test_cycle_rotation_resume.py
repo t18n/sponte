@@ -140,7 +140,7 @@ def test_wrap_rotation_finalizes_and_advances_before_exit(monkeypatch, tmp_path:
     assert persisted == ["PRIORITIES"]
 
 
-def test_resume_starts_with_fresh_rotation_budget(monkeypatch, tmp_path: Path) -> None:
+def test_resume_restores_rotation_budget_and_warning_state(monkeypatch, tmp_path: Path) -> None:
     cfg = AutoFocusConfig(
         primary=tmp_path,
         harness=_DummyHarness(),
@@ -168,8 +168,8 @@ def test_resume_starts_with_fresh_rotation_budget(monkeypatch, tmp_path: Path) -
 
     assert rc == 3
     assert observed == {
-        "total_tokens": 0,
-        "token_warning_emitted": False,
+        "total_tokens": 80_000,
+        "token_warning_emitted": True,
     }
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ralph_focus.strategies.amp import AmpStrategy
 from ralph_focus.strategies.claude import ClaudeStrategy
@@ -11,6 +11,9 @@ from ralph_focus.strategies.codex import CodexStrategy
 from ralph_focus.strategies.cursor import CursorStrategy
 from ralph_focus.strategies.droid import DroidStrategy
 from ralph_focus.strategies.oz import OzStrategy
+
+if TYPE_CHECKING:
+    from ralph_focus.contracts import RunEventCallback, RunResult, RunWatchdog
 
 
 @runtime_checkable
@@ -31,7 +34,9 @@ class AgentStrategy(Protocol):
         use_stream_json: bool,
         tee: bool,
         metrics_out: Path | None,
-    ) -> tuple[int, dict[str, int]]:
+        watchdog: "RunWatchdog | None",
+        event_callback: "RunEventCallback | None",
+    ) -> "RunResult":
         ...
 
 

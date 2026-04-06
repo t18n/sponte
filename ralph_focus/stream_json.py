@@ -7,6 +7,15 @@ from pathlib import Path
 from typing import Any
 
 
+def _extract_usage_totals(obj: Any) -> dict[str, int]:
+    if not isinstance(obj, dict):
+        return {}
+    usage = obj.get("usage") or obj.get("tokenUsage") or obj.get("token_usage")
+    if isinstance(usage, dict):
+        return {str(k): int(v) for k, v in usage.items() if isinstance(v, (int, float))}
+    return {}
+
+
 def _collect_usage_bits(obj: Any, out: list[str], seen: set[int]) -> None:
     if not isinstance(obj, dict):
         return
@@ -106,10 +115,25 @@ def parse_usage_totals(path: Path) -> dict[str, int]:
     r = last_result_from_stream_path(path)
     if not r:
         return {}
-    usage = r.get("usage") or r.get("tokenUsage") or r.get("token_usage")
-    if isinstance(usage, dict):
-        return {str(k): int(v) for k, v in usage.items() if isinstance(v, (int, float))}
-    return {}
+    return _extract_usage_totals(r)
+
+
+def usage_delta_from_stream_line(line: str, previous: dict[str, int]) -> tuple[dict[str, int], dict[str, int]]:
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return {}, dict(previous)
+    current = _extract_usage_totals(obj)
+    if not current:
+        return {}, dict(previous)
+    updated = dict(previous)
+    delta: dict[str, int] = {}
+    for key, value in current.items():
+        prior = updated.get(key, 0)
+        if value > prior:
+            delta[key] = value - prior
+            updated[key] = value
+    return delta, updated
 
 
 def summarize_stream_file(path: Path) -> str:

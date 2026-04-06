@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from ralph_focus.live_usage import with_live_usage_events
+from ralph_focus.stream_runtime import run_subprocess_streaming
+
+if TYPE_CHECKING:
+    from ralph_focus.contracts import RunEventCallback, RunResult, RunWatchdog
 
 def _append_log(log_file: Path, chunk: str) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -44,7 +48,11 @@ class AmpStrategy:
         use_stream_json: bool,
         tee: bool,
         metrics_out: Path | None,
-    ) -> tuple[int, dict[str, int]]:
+        watchdog: "RunWatchdog | None",
+        event_callback: "RunEventCallback | None",
+    ) -> "RunResult":
+        from ralph_focus.contracts import RunResult
+
         del use_stream_json, metrics_out
         iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         header = f"\n======== {iso} amp model={model or 'default'} ========\n"
@@ -54,22 +62,21 @@ class AmpStrategy:
         if _dangerously_allow_all():
             args.append("--dangerously-allow-all")
         args.extend(["-x", prompt])
-        if tee:
-            proc = subprocess.Popen(
-                args,
-                cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                sys.stdout.write(line)
-                _append_log(log_file, line)
-            proc.wait()
-            return proc.returncode or 0, {}
-        proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
-        out = (proc.stdout or "") + (proc.stderr or "")
-        _append_log(log_file, out)
-        return proc.returncode or 0, {}
+        live_event_callback = with_live_usage_events(
+            use_stream_json=False,
+            event_callback=event_callback,
+        )
+        result = run_subprocess_streaming(
+            args,
+            cwd=cwd,
+            log_file=log_file,
+            tee=tee,
+            watchdog=watchdog,
+            event_callback=live_event_callback,
+        )
+        return RunResult(
+            exit_code=result.exit_code,
+            usage={},
+            retryable=result.retryable,
+            cancellation_reason=result.cancellation_reason,
+        )

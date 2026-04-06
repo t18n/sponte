@@ -15,5 +15,11 @@ def test_step_done_line_includes_model_and_tokens() -> None:
     assert "tokens=80,000" in line
 
 
+def test_phase_bar_line_marks_estimated_live_tokens() -> None:
+    line = format_phase_bar_line(2, 10, "IMPLEMENT_2", model="gpt-5", token_total=12_345, token_estimated=True)
+
+    assert "tokens~=12,345" in line
+
+
 def test_max_agent_steps_includes_verify_phase() -> None:
     assert max_agent_steps(implement_max=15, improve_implement_max=5, conflict_max=5) == 43

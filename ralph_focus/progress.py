@@ -60,34 +60,82 @@ def task_block(rel: str, label: str, open_c: int, done_c: int) -> None:
     c.print(f"[ralph] Checklist: {open_c} open, {done_c} done")
 
 
-def _format_token_total(token_total: int | None) -> str:
+def _format_token_total(token_total: int | None, *, estimated: bool = False) -> str:
     if token_total is None:
         return ""
-    return f" tokens={token_total:,}"
+    label = "tokens~=" if estimated else "tokens="
+    return f" {label}{token_total:,}"
 
 
-def format_phase_bar_line(cur: int, max_s: int, label: str, *, model: str | None = None, token_total: int | None = None) -> str:
+def format_phase_bar_line(
+    cur: int,
+    max_s: int,
+    label: str,
+    *,
+    model: str | None = None,
+    token_total: int | None = None,
+    token_estimated: bool = False,
+) -> str:
     width = 20
     pct = min(100, cur * 100 // max(max_s, 1))
     filled = min(width, cur * width // max(max_s, 1))
     bar = "█" * filled + "░" * (width - filled)
     model_text = f" model={model}" if model else ""
-    return f"[ralph] Phase [{bar}] {cur}/{max_s}  {label}{model_text}{_format_token_total(token_total)}"
+    return f"[ralph] Phase [{bar}] {cur}/{max_s}  {label}{model_text}{_format_token_total(token_total, estimated=token_estimated)}"
 
 
-def phase_bar(cur: int, max_s: int, label: str, *, model: str | None = None, token_total: int | None = None) -> None:
+def phase_bar(
+    cur: int,
+    max_s: int,
+    label: str,
+    *,
+    model: str | None = None,
+    token_total: int | None = None,
+    token_estimated: bool = False,
+) -> None:
     c = get_console()
-    c.print(format_phase_bar_line(cur, max_s, label, model=model, token_total=token_total))
+    c.print(
+        format_phase_bar_line(
+            cur,
+            max_s,
+            label,
+            model=model,
+            token_total=token_total,
+            token_estimated=token_estimated,
+        )
+    )
 
 
-def format_step_done_line(label: str, summary: str, *, model: str | None = None, token_total: int | None = None) -> str:
+def format_step_done_line(
+    label: str,
+    summary: str,
+    *,
+    model: str | None = None,
+    token_total: int | None = None,
+    token_estimated: bool = False,
+) -> str:
     model_text = f" model={model}" if model else ""
-    return f"[green][ralph] Done:[/green] {label}{model_text}{_format_token_total(token_total)} — {summary}"
+    return f"[green][ralph] Done:[/green] {label}{model_text}{_format_token_total(token_total, estimated=token_estimated)} — {summary}"
 
 
-def step_done(label: str, summary: str, *, model: str | None = None, token_total: int | None = None) -> None:
+def step_done(
+    label: str,
+    summary: str,
+    *,
+    model: str | None = None,
+    token_total: int | None = None,
+    token_estimated: bool = False,
+) -> None:
     c = get_console()
-    c.print(format_step_done_line(label, summary, model=model, token_total=token_total))
+    c.print(
+        format_step_done_line(
+            label,
+            summary,
+            model=model,
+            token_total=token_total,
+            token_estimated=token_estimated,
+        )
+    )
 
 
 def merge_precheck_warning(reason: str, detail: str = "", *, max_detail_lines: int = 15) -> None:

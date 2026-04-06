@@ -15,6 +15,7 @@ from ralph_focus.paths import (
     resume_file,
     rotation_handoff_file,
 )
+from ralph_focus.run_events import RunEvent, RunEventCallback, RunWatchdog
 from ralph_focus.strategies import AgentStrategy, get_strategy
 from ralph_focus.tasks import normalize_task_path, priorities_file, priority_task_paths_pending, task_has_pending, task_snapshot
 
@@ -35,7 +36,6 @@ class HarnessCapabilities:
     supports_metrics_output: bool = True
     supports_automatic_context_refresh: bool = False
 
-
 @dataclass(frozen=True)
 class RunRequest:
     cwd: Path
@@ -45,12 +45,16 @@ class RunRequest:
     use_stream_json: bool = False
     tee_output: bool = False
     metrics_out: Path | None = None
+    watchdog: RunWatchdog | None = None
+    event_callback: RunEventCallback | None = None
 
 
 @dataclass(frozen=True)
 class RunResult:
     exit_code: int
     usage: dict[str, int] = field(default_factory=dict)
+    retryable: bool = False
+    cancellation_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -164,7 +168,7 @@ class StrategyHarnessAdapter:
         return request
 
     def run(self, request: RunRequest) -> RunResult:
-        exit_code, usage = self.strategy.run(
+        return self.strategy.run(
             request.cwd,
             request.model,
             request.prompt,
@@ -172,8 +176,9 @@ class StrategyHarnessAdapter:
             use_stream_json=request.use_stream_json,
             tee=request.tee_output,
             metrics_out=request.metrics_out,
+            watchdog=request.watchdog,
+            event_callback=request.event_callback,
         )
-        return RunResult(exit_code=exit_code, usage=usage)
 
     def classify_failure(self, context: FailureContext) -> FailureClassification:
         return classify_agent_failure(
