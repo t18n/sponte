@@ -19,3 +19,8 @@
 - Set `SPONTE_INIT_SKIP_HARNESS_PROBE=1` to skip harness and model probing during `sponte init` (e.g. tests or offline runs).
 - Git worktrees default under `.sponte/worktrees`; override with `worktree_root` in `.sponte/settings.json`.
 - Per-session resume and logs under app state use `runners/<id>/agent/`; legacy `auto-focus/` is still read for resume when the new path is absent.
+- Token rotation should refresh agent chat context inside the same Sponte session/loop; routine rotation should not require or suggest `sponte session-resume`.
+- Workspace `.sponte/settings.json` supports lifecycle `commands` (`install`, `dev`, `check`, `build`, `test`, `verify`); `sponte init` auto-detects defaults and docs position them as a token saver.
+- `sponte init` should add `.sponte/` to `.gitignore` before other init work; if `worktree_root` is outside `.sponte/`, ignore that path too.
+- `agent --auto` should choose tasks via the plan model with lock-aware backlog selection instead of relying on `priorities.md`.
+- `sponte agent` uses `--task`, `--resume-session`, and `--resume-task`; `--auto` requires an initialized task store and otherwise should point users to `sponte task-plan`.
