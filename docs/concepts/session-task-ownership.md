@@ -15,6 +15,8 @@
 
 Use `task-resume` when you want a fresh session id but the same interrupted or `review-required` task. Use `session-resume` when you want to pick up exactly where a known session left off.
 
+Token-rotation threshold refresh is different: Sponte keeps the same session id and, for built-in harnesses, starts the next agent invocation with fresh harness context automatically inside the same `sponte agent` loop. That path does **not** require `session-resume`.
+
 ## Cancellation
 
 `task-cancel` is **destructive**: it clears locks and resume state for the owner, removes the worktree (even if dirty), and moves the task file from `in-progress` back to `backlog` when applicable so the task can be claimed again.

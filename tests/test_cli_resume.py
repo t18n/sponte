@@ -90,7 +90,7 @@ def test_rotation_handoff_markdown_includes_resume_context() -> None:
     assert "post-step trigger, not a hard cap" in result
     assert "`80,000`" in result
     assert "`79,500`" in result
-    assert "sponte session-resume rap-test1234" in result
+    assert "resume this same session automatically with fresh harness context" in result
 
 
 def test_print_rotation_handoff_inline_renders_content(monkeypatch) -> None:
@@ -118,3 +118,4 @@ def test_token_rotation_notice_clarifies_post_step_trigger() -> None:
     assert "after the completed step" in result
     assert "80,000" in result
     assert "hard cap" not in result
+    assert "automatically" in result

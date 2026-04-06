@@ -93,6 +93,10 @@ sponte agent --workspace /absolute/path/to/workspace --trunk-branch main
 # Start an agent cycle for one explicit task
 sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/backlog/example-task.md
 
+# Token rotation refresh stays in the same Sponte session automatically
+# (no manual `session-resume` needed for the normal threshold handoff)
+sponte agent --workspace /absolute/path/to/workspace --task /absolute/path/to/workspace/.sponte/tasks/backlog/example-task.md --rotate-threshold-tokens 80000
+
 # Resume the same session (lane)
 sponte session-resume rap-abcd1234 --workspace /absolute/path/to/workspace
 

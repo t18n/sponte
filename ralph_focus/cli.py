@@ -187,7 +187,16 @@ def _token_rotation_notice(*, rotate_threshold_tokens: int) -> str:
     return (
         "Token rotation threshold was detected after the completed step "
         f"(session now at or above {rotate_threshold_tokens:,} rotation tokens); "
-        "resume the same session to continue from saved state."
+        "refreshing harness context automatically and continuing the same session."
+    )
+
+
+def _manual_token_rotation_notice(*, rotate_threshold_tokens: int, runner_id: str) -> str:
+    return (
+        "Token rotation threshold was detected after the completed step "
+        f"(session now at or above {rotate_threshold_tokens:,} rotation tokens), "
+        "but this harness cannot refresh context automatically. Resume the same "
+        f"session manually with: sponte session-resume {runner_id}"
     )
 
 
@@ -222,11 +231,10 @@ def _rotation_handoff_markdown(
             f"- Agent steps this session: `{stats.agent_steps}`",
             "",
             "## Next step",
-            f"Resume the same session to continue from `{resume_state.phase or 'unknown'}`:",
-            "",
-            "```bash",
-            f"sponte session-resume {runner_id}",
-            "```",
+            (
+                "Sponte will resume this same session automatically with fresh "
+                f"harness context from `{resume_state.phase or 'unknown'}`."
+            ),
         ]
     )
 
@@ -526,7 +534,10 @@ def cmd_agent(
     ] = None,
     rotate_threshold_tokens: Annotated[
         int | None,
-        typer.Option("--rotate-threshold-tokens", help="Rotate to fresh context at this token total (default: env/config)"),
+        typer.Option(
+            "--rotate-threshold-tokens",
+            help="Refresh harness context automatically at this token total (default: env/config)",
+        ),
     ] = None,
     warn_threshold_tokens: Annotated[
         int | None,
@@ -943,19 +954,29 @@ def cmd_agent(
                 stats.exit_reason = "no_actionable_task"
                 break
             if rc == 3:
-                stats.exit_reason = "token_rotation"
                 handoff_path = _write_rotation_handoff(
                     primary=primary,
                     runner_id=runner_id_effective,
                     stats=stats,
                     rotate_threshold_tokens=cfg.rotate_policy.rotate_threshold,
                 )
-                if handoff_path is not None:
+                if handoff_path is not None and cfg.harness.capabilities.supports_automatic_context_refresh:
                     _print_rotation_handoff_inline(
                         path=handoff_path,
                         content=handoff_path.read_text(encoding="utf-8", errors="replace"),
                     )
-                console.print(f"[yellow]{_token_rotation_notice(rotate_threshold_tokens=cfg.rotate_policy.rotate_threshold)}[/yellow]")
+                if cfg.harness.capabilities.supports_automatic_context_refresh:
+                    console.print(
+                        f"[yellow]{_token_rotation_notice(rotate_threshold_tokens=cfg.rotate_policy.rotate_threshold)}[/yellow]"
+                    )
+                    consecutive_cycle_errors = 0
+                    use_resume_flag = True
+                    resume_state_for_cycle = None
+                    continue
+                console.print(
+                    f"[yellow]{_manual_token_rotation_notice(rotate_threshold_tokens=cfg.rotate_policy.rotate_threshold, runner_id=runner_id_effective)}[/yellow]"
+                )
+                stats.exit_reason = "token_rotation"
                 break
             if rc != 0:
                 resume_st = load_resume(

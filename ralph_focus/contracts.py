@@ -33,6 +33,7 @@ class HarnessCapabilities:
     supports_stream_json: bool = True
     supports_tee_output: bool = True
     supports_metrics_output: bool = True
+    supports_automatic_context_refresh: bool = False
 
 
 @dataclass(frozen=True)
@@ -199,6 +200,9 @@ def harness_capabilities_for_strategy(strategy_id: str) -> HarnessCapabilities:
         supports_stream_json=supports_stream_json,
         supports_tee_output=True,
         supports_metrics_output=supports_stream_json,
+        supports_automatic_context_refresh=strategy_id != "custom" and strategy_id in (
+            _STREAM_JSON_STRATEGY_IDS | _KNOWN_NON_STREAM_JSON_STRATEGY_IDS
+        ),
     )
 
 

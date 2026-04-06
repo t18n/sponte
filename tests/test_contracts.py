@@ -114,16 +114,22 @@ def test_real_strategy_harness_capabilities_match_backend_support() -> None:
 
     assert cursor.capabilities.supports_stream_json is True
     assert cursor.capabilities.supports_metrics_output is True
+    assert cursor.capabilities.supports_automatic_context_refresh is True
     assert droid.capabilities.supports_stream_json is True
     assert droid.capabilities.supports_metrics_output is True
+    assert droid.capabilities.supports_automatic_context_refresh is True
     assert claude.capabilities.supports_stream_json is False
     assert claude.capabilities.supports_metrics_output is False
+    assert claude.capabilities.supports_automatic_context_refresh is True
     assert codex.capabilities.supports_stream_json is False
     assert codex.capabilities.supports_metrics_output is False
+    assert codex.capabilities.supports_automatic_context_refresh is True
     assert amp.capabilities.supports_stream_json is False
     assert amp.capabilities.supports_metrics_output is False
+    assert amp.capabilities.supports_automatic_context_refresh is True
     assert oz.capabilities.supports_stream_json is False
     assert oz.capabilities.supports_metrics_output is False
+    assert oz.capabilities.supports_automatic_context_refresh is True
 
 
 def test_get_harness_adapts_existing_strategy_lookup(monkeypatch) -> None:
@@ -144,6 +150,7 @@ def test_unknown_strategy_capabilities_fail_closed() -> None:
 
     assert capabilities.supports_stream_json is False
     assert capabilities.supports_metrics_output is False
+    assert capabilities.supports_automatic_context_refresh is False
 
 
 def test_file_task_store_wraps_existing_task_helpers(tmp_path: Path) -> None:

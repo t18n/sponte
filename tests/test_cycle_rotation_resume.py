@@ -208,6 +208,27 @@ def test_resume_prepends_rotation_handoff_to_first_prompt(monkeypatch, tmp_path:
     assert prompts[0].startswith("Resume note: start from IMPLEMENT round 2.")
 
 
+def test_resume_handoff_is_only_prepended_once(tmp_path: Path, monkeypatch) -> None:
+    from ralph_focus import cycle
+
+    cfg = AutoFocusConfig(
+        primary=tmp_path,
+        harness=_DummyHarness(),
+        plan_model="planner",
+        execute_model="executor",
+    )
+    cfg.resume_handoff = "Resume note"
+    cfg.resume_handoff_pending = True
+
+    monkeypatch.setattr(cycle, "render_prompt", lambda *args, **kwargs: "Prompt body")
+
+    first = cfg._sub("plan", f"{TASKS_DIR}/in-progress/example.md", "/tmp/plan.md")
+    second = cfg._sub("plan", f"{TASKS_DIR}/in-progress/example.md", "/tmp/plan.md")
+
+    assert first.startswith("Resume note\n\n---\n\nPrompt body")
+    assert second == "Prompt body"
+
+
 def test_resume_restores_harness_from_saved_agent_kind(monkeypatch, tmp_path: Path) -> None:
     cfg = AutoFocusConfig(
         primary=tmp_path,

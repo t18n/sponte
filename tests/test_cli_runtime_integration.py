@@ -777,3 +777,118 @@ def test_agent_help_uses_session_language_for_resume_option() -> None:
     assert "--task" in result.stdout
     assert "--auto" in result.stdout
     assert "plan model" in result.stdout.lower()
+    assert "refresh harness" in result.stdout.lower()
+    assert "automatically" in result.stdout.lower()
+
+
+def test_auto_focus_rotation_auto_resumes_same_session(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+    from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
+
+    class _Harness:
+        id = "cursor"
+        display_name = "Cursor"
+        capabilities = HarnessCapabilities(supports_automatic_context_refresh=True)
+
+        def availability(self) -> AvailabilityReport:
+            return AvailabilityReport(available=True)
+
+        def prepare(self, request: RunRequest) -> RunRequest:
+            return request
+
+        def run(self, request: RunRequest) -> RunResult:
+            return RunResult(exit_code=0, usage={})
+
+    calls: list[bool] = []
+    handoff_path = tmp_path / "rotation-handoff.md"
+    handoff_path.write_text("# Rotation handoff\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
+    monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "_write_rotation_handoff", lambda **_kwargs: handoff_path)
+    monkeypatch.setattr(cli, "_print_rotation_handoff_inline", lambda **_kwargs: None)
+
+    def fake_run_one_cycle(_cfg, *, use_resume: bool, resume_state=None, stop_after_plan: bool = False) -> int:
+        calls.append(use_resume)
+        return 3 if len(calls) == 1 else 0
+
+    monkeypatch.setattr(cli, "run_one_cycle", fake_run_one_cycle)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "agent",
+            "--once",
+            "--skip-preflight",
+            "--task",
+            str(tmp_path / TASKS_DIR / "backlog" / "example.md"),
+            "--agent",
+            "cursor",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [False, True]
+    assert "sponte session-resume" not in _output(result)
+
+
+def test_auto_focus_rotation_falls_back_to_manual_resume_when_harness_cannot_refresh(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from ralph_focus import cli
+    from ralph_focus.contracts import AvailabilityReport, HarnessCapabilities, RunRequest, RunResult
+
+    class _Harness:
+        id = "custom"
+        display_name = "Custom"
+        capabilities = HarnessCapabilities(supports_automatic_context_refresh=False)
+
+        def availability(self) -> AvailabilityReport:
+            return AvailabilityReport(available=True)
+
+        def prepare(self, request: RunRequest) -> RunRequest:
+            return request
+
+        def run(self, request: RunRequest) -> RunResult:
+            return RunResult(exit_code=0, usage={})
+
+    handoff_path = tmp_path / "rotation-handoff.md"
+    handoff_path.write_text("# Rotation handoff\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "_effective_runner_id", lambda _runner_id: "rap-test1234")
+    monkeypatch.setattr(cli, "_print_auto_focus_settings", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_session_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "write_ralph_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "finalize_ralph_lock_if_session_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "resolve_harness", lambda _p, _name: _Harness(), raising=False)
+    monkeypatch.setattr(cli, "_write_rotation_handoff", lambda **_kwargs: handoff_path)
+    monkeypatch.setattr(cli, "_print_rotation_handoff_inline", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "run_one_cycle", lambda *_args, **_kwargs: 3)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        [
+            "agent",
+            "--once",
+            "--skip-preflight",
+            "--task",
+            str(tmp_path / TASKS_DIR / "backlog" / "example.md"),
+            "--agent",
+            "custom",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "sponte session-resume" in _output(result)
