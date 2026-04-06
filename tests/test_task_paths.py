@@ -78,6 +78,43 @@ def test_pending_selectable_task_paths_include_any_markdown_not_locked(tmp_path:
     assert pending_selectable_task_paths(tmp_path) == [task_a]
 
 
+def test_task_work_kind_slug_defaults_to_feat(tmp_path: Path) -> None:
+    from ralph_focus.tasks import task_work_kind_slug
+
+    tasks_root = tmp_path / TASKS_DIR
+    flat = tasks_root / "solo.md"
+    tasks_root.mkdir(parents=True, exist_ok=True)
+    flat.write_text("# Solo\n", encoding="utf-8")
+    assert task_work_kind_slug(flat, tmp_path) == "feat"
+
+
+def test_task_work_kind_slug_from_path_prefix(tmp_path: Path) -> None:
+    from ralph_focus.tasks import task_work_kind_slug
+
+    fix_task = tmp_path / TASKS_DIR / "fix" / "oauth.md"
+    fix_task.parent.mkdir(parents=True, exist_ok=True)
+    fix_task.write_text("# Fix oauth\n", encoding="utf-8")
+    assert task_work_kind_slug(fix_task, tmp_path) == "fix"
+
+
+def test_task_work_kind_slug_skips_stage_folders(tmp_path: Path) -> None:
+    from ralph_focus.tasks import task_work_kind_slug
+
+    p = tmp_path / TASKS_DIR / "in-progress" / "refactor" / "x.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("# X\n", encoding="utf-8")
+    assert task_work_kind_slug(p, tmp_path) == "refactor"
+
+
+def test_task_work_kind_slug_prefers_frontmatter_over_path(tmp_path: Path) -> None:
+    from ralph_focus.tasks import task_work_kind_slug
+
+    p = tmp_path / TASKS_DIR / "fix" / "nope.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("kind: chore\n\n# Nope\n", encoding="utf-8")
+    assert task_work_kind_slug(p, tmp_path) == "chore"
+
+
 def test_sponte_job_paths_under_workspace(tmp_path: Path) -> None:
     from ralph_focus.paths import (
         sponte_job_session_dir,

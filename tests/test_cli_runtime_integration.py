@@ -796,8 +796,8 @@ def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: 
             active_task_id="demo-abc123",
             rel_task=f"{TASKS_DIR}/demo.md",
             phase="IMPLEMENT",
-            worktree_path=str(tmp_path / "wt-demo"),
-            branch="ralph/wt-demo",
+            worktree_path=str(tmp_path / "feat_demo-abc123"),
+            branch="feat/demo-abc123",
         ),
     )
     write_task_job_status(
@@ -807,8 +807,8 @@ def test_status_and_inspection_commands_render_job_index(monkeypatch, tmp_path: 
             rel_task=f"{TASKS_DIR}/demo.md",
             stage="in-progress",
             owning_session_id="rap-1111",
-            worktree_path=str(tmp_path / "wt-demo"),
-            branch="ralph/wt-demo",
+            worktree_path=str(tmp_path / "feat_demo-abc123"),
+            branch="feat/demo-abc123",
             task_title="Demo task",
         ),
     )

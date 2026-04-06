@@ -17,6 +17,7 @@ _PENDING = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[[\s]\]", re.MULTILINE)
 _DONE = re.compile(r"^[\s]*([-*]|[0-9]+\.)[\s]+\[x\]", re.MULTILINE)
 _TASK_LINE = re.compile(r"^task:\s*(.+)$", re.MULTILINE)
 _H1_LINE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+_TASK_KIND_HEADER = re.compile(r"^(?:kind|type):\s*(.+)$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,53 @@ def task_id_from_resolved_path(task_abs: Path) -> str:
     except OSError:
         key = str(task_abs)
     return f"t-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _normalize_work_kind_slug(source: str) -> str:
+    """Lowercase ``feat``/``fix``/``refactor``-style slug for branch/worktree naming."""
+    s = source.strip().strip('"`')
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9-]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    if not s:
+        return ""
+    if len(s) > 48:
+        s = s[:48].rstrip("-")
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", s):
+        return ""
+    return s
+
+
+def task_work_kind_slug(task_abs: Path, repo: Path) -> str:
+    """
+    Conventional-commit-style prefix for git branch and worktree directory names.
+
+    Resolution order: ``kind:`` / ``type:`` line in the task body (first ~60 lines),
+    else the first path segment under ``.sponte/tasks/`` that is not a workflow
+    stage or reserved subtree name, else ``feat``.
+    """
+    default = "feat"
+    if not task_abs.is_file():
+        return default
+    head = task_abs.read_text(encoding="utf-8", errors="replace")[:8000]
+    first_lines = "\n".join(head.splitlines()[:60])
+    m = _TASK_KIND_HEADER.search(first_lines)
+    if m:
+        slug = _normalize_work_kind_slug(m.group(1))
+        if slug:
+            return slug
+    try:
+        tasks_root = (repo / TASKS_DIR).resolve()
+        rel = task_abs.expanduser().resolve().relative_to(tasks_root)
+    except (OSError, ValueError):
+        return default
+    for part in rel.parts[:-1]:
+        if part in _TASK_STAGES or part in _TASK_PATH_SKIP_PARTS:
+            continue
+        slug = _normalize_work_kind_slug(part)
+        if slug:
+            return slug
+    return default
 
 
 def normalize_task_body_for_naming_hash(text: str) -> str:

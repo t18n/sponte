@@ -116,6 +116,7 @@ from ralph_focus.tasks import (
     task_has_pending,
     task_id_from_resolved_path,
     task_label,
+    task_work_kind_slug,
 )
 from ralph_focus.tasks_lock_registry import (
     path_is_tasks_locked,
@@ -968,8 +969,9 @@ def run_one_cycle(
         task_rel = task_abs.relative_to(primary).as_posix()
 
         safe_tid = sanitize_job_segment(cfg.task_id)
-        wt_path = worktrees_base(primary) / f"wt-{safe_tid}"
-        br_name = f"ralph/wt-{safe_tid}"[:200]
+        work_kind = task_work_kind_slug(task_abs, primary)
+        wt_path = worktrees_base(primary) / f"{work_kind}_{safe_tid}"
+        br_name = f"{work_kind}/{safe_tid}"[:200]
         main_ref = resolve_trunk_branch_ref(primary, cli_override=cfg.trunk_branch_override)
 
         oc, dc = count_checklist(task_abs)

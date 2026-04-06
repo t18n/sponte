@@ -45,7 +45,7 @@ def test_task_job_status_roundtrip(tmp_path: Path) -> None:
         rel_task=f"{TASKS_DIR}/in-progress/demo.md",
         owning_session_id="rap-1111",
         worktree_path=str(root / "wt"),
-        branch="ralph/wt-demo-abcdef",
+        branch="feat/demo-abcdef",
         task_title="Demo",
     )
     write_task_job_status(root, rec)
@@ -53,4 +53,4 @@ def test_task_job_status_roundtrip(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.task_id == "demo-abcdef"
     assert loaded.owning_session_id == "rap-1111"
-    assert loaded.branch == "ralph/wt-demo-abcdef"
+    assert loaded.branch == "feat/demo-abcdef"
