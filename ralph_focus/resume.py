@@ -58,6 +58,8 @@ class ResumeState:
     allow_agent_pick: str = "false"
     session_deadline_epoch: str = ""
     total_tokens: int = 0
+    # Cumulative API token count at task claim time (for per-task analytics deltas).
+    task_claim_total_tokens: int = 0
     no_progress_loops: int = 0
     token_warning_emitted: str = "false"
     # Generation id for CLI --resume-session / locks; may differ from runners/<segment>/ when segment is hashed.
@@ -89,6 +91,7 @@ class ResumeState:
             "R_RESUME_ALLOW_AGENT_PICK": self.allow_agent_pick,
             "R_RESUME_SESSION_DEADLINE_EPOCH": self.session_deadline_epoch,
             "R_RESUME_TOTAL_TOKENS": str(self.total_tokens),
+            "R_RESUME_TASK_CLAIM_TOTAL_TOKENS": str(self.task_claim_total_tokens),
             "R_RESUME_NO_PROGRESS_LOOPS": str(self.no_progress_loops),
             "R_RESUME_TOKEN_WARNING_EMITTED": self.token_warning_emitted,
             "R_RESUME_RUNNER_ID": self.resume_runner_id,
@@ -225,6 +228,12 @@ def load_resume_detailed(
     cycles_done = _parse_int(raw, "R_RESUME_CYCLES_DONE", 0)
     total_tokens = _parse_int(raw, "R_RESUME_TOTAL_TOKENS", 0)
     no_progress_loops = _parse_int(raw, "R_RESUME_NO_PROGRESS_LOOPS", 0)
+    claim_raw = raw.get("R_RESUME_TASK_CLAIM_TOTAL_TOKENS")
+    if claim_raw is None or claim_raw == "":
+        task_claim_total_tokens = total_tokens
+    else:
+        parsed_claim = _parse_int(raw, "R_RESUME_TASK_CLAIM_TOTAL_TOKENS", total_tokens)
+        task_claim_total_tokens = total_tokens if parsed_claim is None else parsed_claim
     numeric_values = (
         implement_next,
         improve_i,
@@ -234,6 +243,7 @@ def load_resume_detailed(
         cycles_done,
         total_tokens,
         no_progress_loops,
+        task_claim_total_tokens,
     )
     if any(value is None for value in numeric_values):
         return None, ResumeLoadFailureReason.invalid_numeric_fields
@@ -262,6 +272,7 @@ def load_resume_detailed(
             allow_agent_pick=raw.get("R_RESUME_ALLOW_AGENT_PICK", "false"),
             session_deadline_epoch=raw.get("R_RESUME_SESSION_DEADLINE_EPOCH", ""),
             total_tokens=total_tokens,
+            task_claim_total_tokens=task_claim_total_tokens,
             no_progress_loops=no_progress_loops,
             token_warning_emitted=raw.get("R_RESUME_TOKEN_WARNING_EMITTED", "false"),
             resume_runner_id=raw.get("R_RESUME_RUNNER_ID", ""),

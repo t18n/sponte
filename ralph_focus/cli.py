@@ -57,6 +57,9 @@ from ralph_focus.resume import (
 )
 from ralph_focus.session_stats import SessionStats
 from ralph_focus.time_parse import format_seconds_human, parse_duration_to_seconds
+from ralph_focus.git_ops import git_primary_checkout_root
+from ralph_focus.global_analytics import load_global_summary
+from ralph_focus.active_sessions import count_agent_sessions_from_locks
 from ralph_focus.token_rotation import rotation_policy_from_overrides
 from ralph_focus.worktree_cli import worktree_prune_clean, worktree_remove_interactive
 from ralph_focus.workspace_resolve import (
@@ -89,6 +92,7 @@ from ralph_focus.tasks import (
     task_root,
 )
 from ralph_focus.workspace_analytics import (
+    AnalyticsSummary,
     bump_summary,
     emit_lifecycle_event,
     load_summary,
@@ -96,6 +100,7 @@ from ralph_focus.workspace_analytics import (
 )
 from ralph_focus.workspace_settings import load_workspace_settings, workspace_settings_path
 from ralph_focus.workspace_tasks import sponte_tasks_layout_valid
+from ralph_focus.workspaces_registry import load_known_workspaces
 
 app = typer.Typer(help="Sponte — standalone task harness powered by Ralph core.", no_args_is_help=True)
 console = Console(stderr=True)
@@ -1170,6 +1175,59 @@ def _cli_primary(workspace: Path | None) -> Path:
     )
 
 
+def _stats_primary_optional(workspace: Path | None) -> Path | None:
+    """Primary checkout for workspace-scoped stats; ``None`` when cwd is not a Sponte workspace."""
+    if workspace is not None:
+        return _cli_primary(workspace)
+    cwd_root = git_primary_checkout_root(Path.cwd())
+    if cwd_root is None or not sponte_tasks_layout_valid(cwd_root):
+        return None
+    return resolve_primary_workspace(cwd_root, console=console, interactive=False)
+
+
+def _format_decimal_hours(seconds: float) -> str:
+    if seconds <= 0:
+        return "0 h"
+    return f"{seconds / 3600.0:.2f} h"
+
+
+def _format_stats_harnesses(counts: dict[str, int]) -> str:
+    if not counts:
+        return "—"
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+    return ", ".join(f"{k} ({v})" for k, v in items)
+
+
+def _stats_metric_rows(
+    summary: AnalyticsSummary,
+    *,
+    workspace_count: int | None,
+    live_sessions: int,
+) -> list[tuple[str, str]]:
+    sess = summary.sessions_started + summary.sessions_resumed
+    wall = float(summary.total_task_wall_seconds)
+    wall_txt = f"{_format_decimal_hours(wall)} ({format_seconds_human(int(wall))})"
+    rows: list[tuple[str, str]] = []
+    if workspace_count is not None:
+        rows.append(("Workspace count", str(workspace_count)))
+    rows.extend(
+        [
+            ("Session count", str(sess)),
+            ("Session active now", str(live_sessions)),
+            ("Task finished count", str(summary.tasks_completed)),
+            ("Line added", f"{summary.lines_added:,}"),
+            ("Line deleted", f"{summary.lines_deleted:,}"),
+            ("Total wall time", wall_txt),
+            ("Total merges", str(summary.merges_completed)),
+            ("Harnesses", _format_stats_harnesses(summary.harness_counts)),
+            ("Models", _format_stats_harnesses(summary.harness_model_counts)),
+            ("Total tokens", f"{summary.total_tokens:,}"),
+            ("Updated at", summary.updated_at or "—"),
+        ]
+    )
+    return rows
+
+
 @app.command("session-resume", help="Resume a session by id.")
 def cmd_session_resume(
     session_id: Annotated[str, typer.Argument(metavar="SESSION_ID")],
@@ -1396,26 +1454,55 @@ def cmd_task_show(
     _print_task_job_detail(task_id, st)
 
 
-@app.command("stats", help="Workspace analytics counters and recent events (app state).")
+@app.command(
+    "stats",
+    help="Global analytics (all workspaces) and optional workspace events/recent log.",
+)
 def cmd_stats(
     workspace: Annotated[
         Path | None,
         typer.Option("--workspace", "-w", help="Git checkout root"),
     ] = None,
 ) -> None:
-    primary = _cli_primary(workspace)
+    g = load_global_summary()
+    registered = load_known_workspaces()
+    live, stale_locks, lock_files = count_agent_sessions_from_locks()
+    gt = Table(title="Global")
+    gt.add_column("Metric", no_wrap=True)
+    gt.add_column("Value", overflow="fold", ratio=1)
+    for label, val in _stats_metric_rows(
+        g, workspace_count=len(registered), live_sessions=live
+    ):
+        gt.add_row(label, val)
+    if lock_files:
+        gt.add_row("Lock files (stale / total)", f"{stale_locks} / {lock_files}")
+    console.print(Panel(gt, border_style="green"))
+    if len(g.workspace_slugs) > len(registered):
+        console.print(
+            "[dim]Global rollup also keeps a path-hash per distinct resolved checkout root that "
+            f"emitted counters ({len(g.workspace_slugs)}); that can exceed workspace count "
+            "after different paths, temp clones, or tools using your default Sponte state dir.[/dim]"
+        )
+
+    primary = _stats_primary_optional(workspace)
+    if primary is None:
+        if workspace is None:
+            console.print(
+                "[dim]No Sponte workspace in cwd; use -w for workspace-scoped summary and recent events.[/dim]"
+            )
+        return
+
     s = load_summary(primary)
-    t = Table(title="Analytics summary (machine-local)")
-    t.add_column("Metric")
-    t.add_column("Count")
-    t.add_row("sessions_started", str(s.sessions_started))
-    t.add_row("sessions_resumed", str(s.sessions_resumed))
-    t.add_row("tasks_completed", str(s.tasks_completed))
-    t.add_row("tasks_cancelled", str(s.tasks_cancelled))
-    t.add_row("tasks_review_required", str(s.tasks_review_required))
-    t.add_row("cleanup_repairs", str(s.cleanup_repairs))
-    t.add_row("updated_at", s.updated_at or "—")
-    console.print(Panel(t, border_style="green"))
+    try:
+        ws_title_name = primary.resolve().name
+    except OSError:
+        ws_title_name = primary.name
+    t = Table(title=f"This workspace ({ws_title_name})")
+    t.add_column("Metric", no_wrap=True)
+    t.add_column("Value", overflow="fold", ratio=1)
+    for label, val in _stats_metric_rows(s, workspace_count=None, live_sessions=live):
+        t.add_row(label, val)
+    console.print(Panel(t, border_style="cyan"))
     ev = read_recent_events(primary, limit=12)
     if ev:
         et = Table(title="Recent events (newest last)")

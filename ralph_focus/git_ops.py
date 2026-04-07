@@ -102,3 +102,26 @@ def worktree_list_paths(primary: Path) -> list[str]:
 def worktree_registered(primary: Path, wt: Path) -> bool:
     resolved = str(wt.resolve())
     return resolved in {Path(p).resolve().as_posix() for p in worktree_list_paths(primary)}
+
+
+def git_diff_numstat_totals(wt_path: Path, main_ref: str) -> tuple[int, int]:
+    """Return (lines_added, lines_deleted) for ``main_ref...HEAD`` in *wt_path*, best-effort."""
+    ref = (main_ref or "").strip() or "HEAD"
+    rc, out, _ = git(wt_path, "diff", "--numstat", f"{ref}...HEAD")
+    if rc != 0:
+        return 0, 0
+    added = 0
+    deleted = 0
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        a_raw, d_raw = parts[0], parts[1]
+        if a_raw == "-" or d_raw == "-":
+            continue
+        try:
+            added += int(a_raw)
+            deleted += int(d_raw)
+        except ValueError:
+            continue
+    return added, deleted

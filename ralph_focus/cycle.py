@@ -43,7 +43,7 @@ from ralph_focus.harness_resolve import resolve_harness
 from ralph_focus.failure_detection import FailureKind, ProgressSnapshot
 from ralph_focus.phase_policy import PLANNER_PHASES, phase_model_for
 from ralph_focus.git_message import truncate_subject
-from ralph_focus.git_ops import git, worktree_registered
+from ralph_focus.git_ops import git, git_diff_numstat_totals, worktree_registered
 from ralph_focus.workspace_resolve import resolve_trunk_branch_ref
 from ralph_focus.lockfile import release_lock
 from ralph_focus.parallel_locks import (
@@ -105,7 +105,7 @@ from ralph_focus.task_lifecycle import (
     format_claimed_tasks_snapshot,
 )
 from ralph_focus.token_rotation import TokenRotationPolicy, derive_warn_threshold
-from ralph_focus.workspace_analytics import bump_summary, emit_lifecycle_event
+from ralph_focus.workspace_analytics import add_completion_rollups, bump_summary, emit_lifecycle_event
 from ralph_focus.tasks import (
     concrete_task_rel,
     count_checklist,
@@ -307,6 +307,8 @@ class AutoFocusConfig:
     verification_required: bool = True
     merge_required: bool = True
     phase_agent_rounds: int = 0
+    # SessionStats.total_token_count at task claim (for per-task token deltas in analytics).
+    task_claim_token_total: int = 0
 
     def max_progress_steps(self) -> int:
         return max_agent_steps(
@@ -964,6 +966,7 @@ def run_one_cycle(
         # Rotation is scoped to the current resumed process, not cumulative history.
         cfg.stats.total_token_count = st.total_tokens
         cfg.stats.rotation_token_count = st.total_tokens
+        cfg.task_claim_token_total = st.task_claim_total_tokens
         cfg.no_progress_loops = st.no_progress_loops
         cfg.token_warning_emitted = st.token_warning_emitted.lower() == "true"
         handoff_path = rotation_handoff_file(primary, runner_id=cfg.runner_id)
@@ -1092,6 +1095,11 @@ def run_one_cycle(
                 "worktree_path": str(wt_path),
             },
         )
+        try:
+            bump_summary(primary, tasks_claimed=1)
+        except OSError:
+            pass
+        cfg.task_claim_token_total = cfg.stats.total_token_count
 
     cfg.phase_agent_rounds = 0
 
@@ -1542,6 +1550,7 @@ def run_one_cycle(
 
                 _append_phase_log(logf, f"MERGE_TO_{main_ref}")
                 feature_already_merged = is_branch_merged_into(primary, br_name, main_ref)
+                merge_integrated = False
                 if not cfg.merge_required:
                     _append_phase_log(logf, "MERGE_SKIPPED_POLICY")
                     if cfg.progress != "off":
@@ -1584,8 +1593,9 @@ def run_one_cycle(
                         return 3
                     if merge_rc != 0:
                         return 1
+                    merge_integrated = True
                 elif _merge_feature_to_main(primary, br_name, main_ref, logf):
-                    pass
+                    merge_integrated = True
                 else:
                     merge_rc = _resolve_merge_with_agent(
                         cfg,
@@ -1605,6 +1615,17 @@ def run_one_cycle(
                         return 3
                     if merge_rc != 0:
                         return 1
+                    merge_integrated = True
+
+                if merge_integrated:
+                    try:
+                        bump_summary(primary, merges_completed=1)
+                    except OSError:
+                        pass
+
+                dur_sec = max(0.0, time.time() - cfg.stats.started_wall)
+                lines_added, lines_deleted = git_diff_numstat_totals(wt_path, main_ref)
+                token_delta = max(0, cfg.stats.total_token_count - cfg.task_claim_token_total)
 
                 _archive_recorded_artifacts(cfg, wt_path)
                 rc_rm, _, _ = git(primary, "worktree", "remove", str(wt_path))
@@ -1633,6 +1654,16 @@ def run_one_cycle(
                     bump_summary(primary, tasks_completed=1)
                 except OSError:
                     pass
+                try:
+                    add_completion_rollups(
+                        primary,
+                        duration_sec=dur_sec,
+                        token_delta=token_delta,
+                        lines_added=lines_added,
+                        lines_deleted=lines_deleted,
+                    )
+                except OSError:
+                    pass
                 emit_lifecycle_event(
                     primary,
                     event="task_completed",
@@ -1642,11 +1673,14 @@ def run_one_cycle(
                     harness=cfg.harness.id,
                     plan_model=cfg.plan_model,
                     execute_model=cfg.execute_model,
-                    duration_sec=max(0.0, time.time() - cfg.stats.started_wall),
+                    duration_sec=dur_sec,
                     cycles=cfg.stats.agent_steps,
                     metadata={
                         "merge_into_trunk": cfg.merge_required,
                         "cycles_completed": cfg.stats.cycles_completed,
+                        "token_delta": token_delta,
+                        "lines_added": lines_added,
+                        "lines_deleted": lines_deleted,
                     },
                 )
                 return 0
@@ -1715,6 +1749,7 @@ def _persist(
         allow_agent_pick="true" if cfg.allow_agent_pick else "false",
         session_deadline_epoch=cfg.session_deadline_epoch,
         total_tokens=cfg.stats.rotation_tokens(),
+        task_claim_total_tokens=cfg.task_claim_token_total,
         no_progress_loops=cfg.no_progress_loops,
         token_warning_emitted="true" if cfg.token_warning_emitted else "false",
         resume_runner_id=cfg.runner_id,

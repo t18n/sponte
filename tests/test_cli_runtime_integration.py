@@ -5,11 +5,18 @@ from typer.testing import CliRunner
 from config.defaults import TASKS_DIR
 from ralph_focus.resume import ResumeLoadFailureReason, ResumeState
 from ralph_focus.task_jobs import SessionJobStatus, TaskJobStatus, write_session_job_status, write_task_job_status
-from ralph_focus.workspace_analytics import AnalyticsSummary
+from ralph_focus.workspace_analytics import AnalyticsSummary, harness_model_increment_keys
 
 
 def _output(result) -> str:
     return result.stdout + result.stderr
+
+
+def test_harness_model_increment_keys_dedupes_plan_execute() -> None:
+    assert harness_model_increment_keys("cursor", "auto", "auto") == ["cursor:auto"]
+    assert harness_model_increment_keys("cursor", "p", "e") == ["cursor:p", "cursor:e"]
+    assert harness_model_increment_keys("", "a", "b") == []
+    assert harness_model_increment_keys("c", "x", "") == ["c:x"]
 
 
 def test_auto_focus_builds_runtime_config_with_harness(monkeypatch, tmp_path: Path) -> None:
@@ -1002,6 +1009,32 @@ def test_stats_command_renders_summary_and_recent_events(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(cli, "resolve_git_repo_root", lambda *a, **k: tmp_path)
     monkeypatch.setattr(cli, "resolve_primary_workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(cli, "git_primary_checkout_root", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(cli, "sponte_tasks_layout_valid", lambda *_p: True)
+    monkeypatch.setattr(
+        cli,
+        "load_global_summary",
+        lambda: AnalyticsSummary(
+            sessions_started=5,
+            tasks_completed=10,
+            tasks_claimed=12,
+            total_task_wall_seconds=5400.0,
+            total_tokens=100_000,
+            lines_added=400,
+            lines_deleted=50,
+            merges_completed=7,
+            harness_counts={"cursor": 4},
+            harness_model_counts={"cursor:auto": 17, "cursor:gpt-4": 2},
+            workspace_slugs=["abc"],
+            updated_at="2026-04-06T11:00:00Z",
+        ),
+    )
+    monkeypatch.setattr(cli, "count_agent_sessions_from_locks", lambda: (1, 0, 1))
+    monkeypatch.setattr(
+        cli,
+        "load_known_workspaces",
+        lambda: [tmp_path, tmp_path / "other"],
+    )
     monkeypatch.setattr(
         cli,
         "load_summary",
@@ -1012,6 +1045,9 @@ def test_stats_command_renders_summary_and_recent_events(monkeypatch, tmp_path: 
             tasks_cancelled=1,
             tasks_review_required=1,
             cleanup_repairs=2,
+            merges_completed=1,
+            harness_counts={"codex": 1},
+            harness_model_counts={"codex:o1": 1},
             updated_at="2026-04-06T12:00:00Z",
         ),
     )
@@ -1031,13 +1067,56 @@ def test_stats_command_renders_summary_and_recent_events(monkeypatch, tmp_path: 
         ],
     )
 
+    monkeypatch.setenv("COLUMNS", "120")
+    monkeypatch.setenv("LINES", "40")
     runner = CliRunner()
     result = runner.invoke(cli.app, ["stats"])
 
     assert result.exit_code == 0
-    assert "sessions_started" in _output(result)
-    assert "Recent events" in _output(result)
-    assert "demo-abc123" in _output(result)
+    out = _output(result)
+    assert "Global" in out
+    assert "Workspace count" in out
+    assert "Session count" in out
+    assert "Session active now" in out
+    assert "Task finished count" in out
+    assert "Total merges" in out
+    assert "Harnesses" in out
+    assert "cursor (4)" in out
+    assert "Models" in out
+    assert "cursor:auto (17)" in out
+    assert "cursor:gpt-4 (2)" in out
+    assert "Lock files (stale / total)" in out
+    assert "This workspace" in out and tmp_path.name in out
+    assert "codex (1)" in out
+    assert "codex:o1 (1)" in out
+    assert "Recent events" in out
+    assert "demo-abc123" in out
+
+
+def test_stats_global_only_without_workspace(monkeypatch, tmp_path: Path) -> None:
+    from ralph_focus import cli
+
+    monkeypatch.setattr(cli, "git_primary_checkout_root", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        cli,
+        "load_global_summary",
+        lambda: AnalyticsSummary(
+            sessions_started=1,
+            tasks_completed=2,
+            updated_at="2026-04-06T10:00:00Z",
+        ),
+    )
+    monkeypatch.setattr(cli, "count_agent_sessions_from_locks", lambda: (0, 0, 0))
+    monkeypatch.setattr(cli, "load_known_workspaces", lambda: [])
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["stats"])
+
+    assert result.exit_code == 0
+    out = _output(result)
+    assert "Global" in out
+    assert "Workspace count" in out
+    assert "No Sponte workspace in cwd" in out
 
 
 def test_agent_help_uses_session_language_for_resume_option() -> None:

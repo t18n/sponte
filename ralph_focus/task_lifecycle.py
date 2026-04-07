@@ -454,6 +454,7 @@ def prepare_task_resume(repo: Path, task_id: str) -> tuple[str | None, str]:
         allow_agent_pick="false",
         session_deadline_epoch=prev.session_deadline_epoch if prev else "",
         total_tokens=0,
+        task_claim_total_tokens=prev.task_claim_total_tokens if prev else 0,
         no_progress_loops=prev.no_progress_loops if prev else 0,
         token_warning_emitted="false",
         resume_runner_id=new_rid,
