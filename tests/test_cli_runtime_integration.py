@@ -1128,6 +1128,7 @@ def test_stats_global_only_without_workspace(monkeypatch, tmp_path: Path) -> Non
 
 def test_agent_help_uses_session_language_for_resume_option() -> None:
     from ralph_focus import cli
+    from typer.main import get_command
 
     runner = CliRunner()
     result = runner.invoke(cli.app, ["agent", "--help"])
@@ -1135,10 +1136,17 @@ def test_agent_help_uses_session_language_for_resume_option() -> None:
     assert result.exit_code == 0
     assert "SESSION_ID" in result.stdout
     assert "TASK_ID" in result.stdout
-    assert "--resume-session" in result.stdout
-    assert "--resume-task" in result.stdout
-    assert "--task" in result.stdout
-    assert "--auto" in result.stdout
+    click_app = get_command(cli.app)
+    agent_cmd = click_app.commands["agent"]
+    option_names = {
+        opt
+        for param in agent_cmd.params
+        for opt in (*getattr(param, "opts", ()), *getattr(param, "secondary_opts", ()))
+    }
+    assert "--resume-session" in option_names
+    assert "--resume-task" in option_names
+    assert "--task" in option_names
+    assert "--auto" in option_names
     assert "plan model" in result.stdout.lower()
     assert "warn and skip" in result.stdout.lower()
     assert "refresh harness" in result.stdout.lower()
