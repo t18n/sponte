@@ -31,7 +31,7 @@ Sponte is a **local orchestration CLI** for git workspaces: markdown tasks, work
 | [Custom harnesses](guides/custom-harnesses.md) | Headless custom executables |
 | [Overrides](guides/overrides.md) | Prompts, guardrails, precedence |
 | [Review required](guides/review-required.md) | After max phase rounds |
-| [Provider safety](guides/provider-safety.md) | Billing and policy caution |
+| [Provider and local safety](guides/provider-safety.md) | Native CLIs, full permissions, billing, and policy caution |
 
 ## Reference
 

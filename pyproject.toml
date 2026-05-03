@@ -1,9 +1,24 @@
 [project]
 name = "sponte"
 version = "0.1.0"
-description = "Standalone task harness CLI powered by Ralph core"
+description = "Orchestration CLI for AFK agent loops: markdown task store, git worktrees, official harness CLIs"
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Sponte contributors" }]
 requires-python = ">=3.11"
+keywords = ["agents", "automation", "cli", "git", "worktrees"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
 dependencies = [
   "typer>=0.12.0",
   "rich>=13.0.0",
@@ -14,6 +29,11 @@ sponte = "ralph_focus.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/t18n/sponte"
+Repository = "https://github.com/t18n/sponte"
+Issues = "https://github.com/t18n/sponte/issues"
 
 [build-system]
 requires = ["hatchling>=1.21.0"]
@@ -30,6 +50,9 @@ include = [
   "ralph_focus",
   "config",
   "prompts",
+  "CONTRIBUTING.md",
   "README.md",
+  "LICENSE",
+  "SECURITY.md",
   "pyproject.toml",
 ]

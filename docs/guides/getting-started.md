@@ -5,6 +5,7 @@
 - Git checkout of your project
 - A harness CLI installed (e.g. Cursor, Claude Code, Codex) if you use a built-in harness
 - Python + `uv` (see repository README) to run `sponte` from source, or install from PyPI when available
+- A development workspace where you are comfortable giving the selected harness full command permissions. Sponte does not sandbox commands, files, network access, secrets, or production resources.
 
 ## Bootstrap
 
@@ -14,6 +15,8 @@ sponte init
 ```
 
 `init` creates `.sponte/`, writes `.sponte/settings.json` after **validated** harness and model choices (lightweight probe such as `hello`), and sets up the flat task store.
+
+Use Sponte against development checkouts, not production environments or production credentials. It orchestrates native harness CLIs rather than a custom runtime, so normal provider billing, rate limits, authentication, and policy still apply.
 
 `init` also tries to detect workspace lifecycle commands (`install`, `dev`, `check`, `build`, `test`, and an ordered `verify` list) from files at the repo root (for example `package.json`, `Cargo.toml`, `go.mod`, or Python/pytest hints). If several of those ecosystems are present at the root, Sponte skips guessing and leaves `commands` for you to set. Re-running `sponte init` later merges any new detections into **empty** fields without overwriting edits. You can always adjust `commands` in `.sponte/settings.json`. They act as a **token saver**: pointing Sponte at fast, repo-specific checks avoids generic or overly heavy verification and cuts down noisy command output in agent sessions.
 

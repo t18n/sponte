@@ -1,8 +1,30 @@
 # Sponte
 
-Sponte is a standalone CLI for unattended task cycles across multiple git workspaces. The name is Latin *sponte*, meaning *of one’s own accord*.
+Sponte is an orchestration layer for AFK (away-from-keyboard) agentic workflows: it drives unattended cycles that claim and run tasks from a workspace task store across multiple git workspaces.
 
-The public package and command are `sponte`.
+The name is Latin *sponte*, meaning *of one’s own accord*.
+
+The public package and CLI command are `sponte`.
+
+I built Sponte because I wanted agents to pull work from a real task queue while I was away—without losing what was claimed, where it ran, how to resume after interruptions, or how to review changes before they landed on the trunk.
+
+## Experimental status
+
+Sponte is **experimental** and shaped around my personal workflow. It is **opinionated**, not plug-and-play automation, and the defaults assume you will tweak prompts, workspace settings, and task flow.
+
+**Recommended:** run from a clone with [`uv`](https://docs.astral.sh/uv/) (`uv sync`, `uv run sponte …`) so you can adapt the repo to your stack instead of treating released wheels as a finished product.
+
+### Sharp edges
+
+- Expect to be comfortable with **git**, **worktrees**, and reading **diffs** before merges.
+- Agent runs go through **native upstream harness CLIs** (Cursor, Claude, Codex, etc.); you install and authenticate those yourself.
+- Sponte is intended for permissive local development workflows. It does **not** sandbox commands, file access, network access, secrets, or production resources.
+- Use it only in development workspaces where you are comfortable giving the selected harness full command permissions. Do **not** run it against production environments or production credentials.
+- Recovery paths and local state can be subtle when paths or machines differ; plan on occasional **`task-cleanup`** / inspection under `.sponte/jobs/`.
+
+## Who this is for
+
+You might reach for Sponte if you already keep work as a **markdown task backlog**, want **repeatable unattended passes** against explicit task files, and benefit from **isolated worktrees** plus **resume** after interrupted runs—especially on ongoing repos with recurring implementation or maintenance work. It is a poor fit for one-off scripts or tiny projects with no durable task queue.
 
 ## Install
 
@@ -47,33 +69,7 @@ pip install sponte
 uv tool install sponte
 ```
 
-## Publishing to PyPI
-
-Releases are automated with GitHub Actions when you push a version tag. The workflow alone is not enough until PyPI trusts this repository.
-
-### One-time setup
-
-1. **Create the project on PyPI** (if it does not exist): the first successful upload to a name creates the project; see [PyPI help](https://pypi.org/help/) if you need to claim or transfer a name.
-2. **Trusted Publisher**: In PyPI, open the `sponte` project → **Publishing** → **Add a new pending publisher** → choose **GitHub** and set:
-   - Owner / repository: this GitHub repo
-   - Workflow name: `publish.yml`
-   - Environment name: `pypi` (must match the workflow’s `environment: pypi`)
-3. **GitHub environment** (recommended): Create an environment named `pypi` in the repo settings. You can add protection rules (required reviewers) so tag pushes do not publish without approval.
-
-See PyPI’s [Trusted Publishers](https://docs.pypi.org/trusted-publishers/) documentation for details.
-
-### Release checklist
-
-1. Bump `version` in `pyproject.toml` and merge to your release branch (e.g. `main`).
-2. Run tests, e.g. `uv run pytest`.
-3. Create and push an annotated tag whose version matches `pyproject.toml` (leading `v`):
-
-   ```bash
-   git tag -a v0.1.0 -m "Release v0.1.0"
-   git push origin v0.1.0
-   ```
-
-The workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) builds with `uv build` and fails if the tag (without `v`) does not equal `project.version` in `pyproject.toml`.
+For now, prefer the local `uv` flow above if you want to adapt prompts, settings, or task behavior for your own workflow.
 
 ## Core Commands
 
@@ -118,6 +114,8 @@ sponte worktree-remove --workspace /absolute/path/to/workspace
 ```
 
 **Documentation:** [docs/index.md](docs/index.md) (concepts, guides, CLI and config reference).
+
+**Community and safety:** [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## Workspace Model
 
@@ -194,9 +192,11 @@ Sponte is a **local orchestration layer**: it coordinates markdown tasks, git wo
 
 Sponte intentionally does **not** embed a custom agent runtime, so it can track upstream harness changes and paid subscriptions (Cursor, Claude, Codex, etc.) without re‑implementing them.
 
-## Provider usage
+## Safety and provider usage
 
-External APIs can still impose billing, rate limits, or policy risk. Sponte cannot guarantee protection from provider-side surprises. Prefer conservative defaults, avoid on‑demand spending unless you accept that tradeoff, and review harness output and git diffs before merging.
+Sponte drives native/official harness CLIs; it is not a provider-bypass layer or custom agent runtime. You should still expect normal provider billing, rate limits, authentication, and policy enforcement from whichever CLI you run.
+
+The larger local risk is execution scope. Sponte is designed for fully permissive development loops and does not sandbox agent commands, file access, network access, secrets, or production resources. Prefer conservative defaults, avoid on-demand spending unless you accept that tradeoff, and review harness output and git diffs before merging.
 
 ## AI Rules
 
@@ -222,6 +222,30 @@ Sponte keeps the core Ralph workflow: pick a task, create or resume a worktree, 
 
 What changed is the product layer around that core. Sponte makes the public CLI and package name explicit, centers the workspace model on `.sponte/`, supports multiple workspaces more directly, and treats task stores, guardrails, and workspace settings as Sponte-owned primitives. Internal Python modules still use `ralph_focus/` in places while that naming transition finishes.
 
-## Best Fit
+## Maintainer: Publishing to PyPI
 
-Sponte works best for software projects that already manage work as a backlog, want repeatable AI-assisted task execution, and benefit from isolated worktrees plus recovery after interrupted runs. It is strongest for ongoing engineering repos with recurring maintenance, implementation, or follow-up work, rather than one-off scripts or tiny projects with no durable task queue.
+Releases are automated with GitHub Actions when you push a version tag. The workflow alone is not enough until PyPI trusts this repository.
+
+### One-time setup
+
+1. **Create the project on PyPI** (if it does not exist): the first successful upload to a name creates the project; see [PyPI help](https://pypi.org/help/) if you need to claim or transfer a name.
+2. **Trusted Publisher**: In PyPI, open the `sponte` project → **Publishing** → **Add a new pending publisher** → choose **GitHub** and set:
+   - Owner / repository: this GitHub repo
+   - Workflow name: `publish.yml`
+   - Environment name: `pypi` (must match the workflow’s `environment: pypi`)
+3. **GitHub environment** (recommended): Create an environment named `pypi` in the repo settings. You can add protection rules (required reviewers) so tag pushes do not publish without approval.
+
+See PyPI’s [Trusted Publishers](https://docs.pypi.org/trusted-publishers/) documentation for details.
+
+### Release checklist
+
+1. Bump `version` in `pyproject.toml` and merge to your release branch (e.g. `main`).
+2. Run tests, e.g. `uv run pytest`.
+3. Create and push an annotated tag whose version matches `pyproject.toml` (leading `v`):
+
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+The workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) builds with `uv build` and fails if the tag (without `v`) does not equal `project.version` in `pyproject.toml`.

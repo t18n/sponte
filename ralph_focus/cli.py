@@ -59,7 +59,7 @@ from ralph_focus.session_stats import SessionStats
 from ralph_focus.time_parse import format_seconds_human, parse_duration_to_seconds
 from ralph_focus.git_ops import git_primary_checkout_root
 from ralph_focus.global_analytics import load_global_summary
-from ralph_focus.active_sessions import count_agent_sessions_from_locks
+from ralph_focus.active_sessions import count_agent_sessions_from_locks, count_live_sessions_for_primary
 from ralph_focus.token_rotation import rotation_policy_from_overrides
 from ralph_focus.worktree_cli import worktree_prune_clean, worktree_remove_interactive
 from ralph_focus.workspace_resolve import (
@@ -1456,7 +1456,10 @@ def cmd_task_show(
 
 @app.command(
     "stats",
-    help="Global analytics (all workspaces) and optional workspace events/recent log.",
+    help=(
+        "Global analytics (all workspaces) and optional workspace events/recent log; "
+        "workspace panel scopes live session count to this checkout's ralph.lock."
+    ),
 )
 def cmd_stats(
     workspace: Annotated[
@@ -1493,6 +1496,7 @@ def cmd_stats(
         return
 
     s = load_summary(primary)
+    live_this_workspace = count_live_sessions_for_primary(primary)
     try:
         ws_title_name = primary.resolve().name
     except OSError:
@@ -1500,7 +1504,7 @@ def cmd_stats(
     t = Table(title=f"This workspace ({ws_title_name})")
     t.add_column("Metric", no_wrap=True)
     t.add_column("Value", overflow="fold", ratio=1)
-    for label, val in _stats_metric_rows(s, workspace_count=None, live_sessions=live):
+    for label, val in _stats_metric_rows(s, workspace_count=None, live_sessions=live_this_workspace):
         t.add_row(label, val)
     console.print(Panel(t, border_style="cyan"))
     ev = read_recent_events(primary, limit=12)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from config.defaults import RUNTIME_DATA_SEGMENT, SPONTE_DIR
 from ralph_focus.app_state_paths import sponte_state_base_dir
-from ralph_focus.paths import use_workspace_runtime_data
+from ralph_focus.paths import ralph_lock_path, use_workspace_runtime_data
 from ralph_focus.workspaces_registry import load_known_workspaces
 
 
@@ -116,7 +116,28 @@ def count_agent_sessions_from_locks() -> tuple[int, int, int]:
     return live, stale, total
 
 
+def count_live_sessions_for_primary(primary: Path) -> int:
+    """
+    Return ``1`` if this workspace's ``ralph.lock`` exists and its PID is alive, else ``0``.
+
+    Uses :func:`ralph_focus.paths.ralph_lock_path` (same file ``sponte agent`` writes).
+    Multiple concurrent agent lanes still share one lock file per primary.
+    """
+    path = ralph_lock_path(primary)
+    if not path.is_file():
+        return 0
+    data = _read_lock_file(path)
+    if data is None:
+        return 0
+    try:
+        pid = int(data.get("pid", -1))
+    except (TypeError, ValueError):
+        return 0
+    return 1 if _pid_alive(pid) else 0
+
+
 __all__ = [
     "count_agent_sessions_from_locks",
+    "count_live_sessions_for_primary",
     "iter_ralph_lock_files",
 ]

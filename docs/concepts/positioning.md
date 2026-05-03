@@ -6,6 +6,7 @@ Sponte is a **local orchestration layer** for a git workspace: markdown tasks, w
 
 - Not an IDE, editor, or diff/review UI replacement.
 - Not a custom agent framework: it **wraps** upstream CLIs so labs can ship harness changes and subscription compatibility without Sponte re-implementing them.
+- Not a sandbox or security boundary: harnesses run with the permissions you give them.
 
 ## How to work
 
@@ -13,4 +14,6 @@ Use your normal **IDE**, **git**, and **diff** tools to inspect `.sponte/jobs/`,
 
 ## Provider reality
 
-External services can still impose billing, rate limits, or policy enforcement. Sponte cannot guarantee protection from provider-side surprises. Prefer conservative usage; see [provider-safety.md](../guides/provider-safety.md).
+Sponte drives native/official harness CLIs and is not intended to bypass provider systems. External services can still impose billing, rate limits, authentication, and policy enforcement.
+
+The stronger local warning is permissions: Sponte is best suited to development workspaces and fully permissive command execution. Do not point it at production environments or credentials. See [provider-safety.md](../guides/provider-safety.md).

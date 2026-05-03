@@ -1030,6 +1030,7 @@ def test_stats_command_renders_summary_and_recent_events(monkeypatch, tmp_path: 
         ),
     )
     monkeypatch.setattr(cli, "count_agent_sessions_from_locks", lambda: (1, 0, 1))
+    monkeypatch.setattr(cli, "count_live_sessions_for_primary", lambda _p: 0)
     monkeypatch.setattr(
         cli,
         "load_known_workspaces",
@@ -1087,6 +1088,12 @@ def test_stats_command_renders_summary_and_recent_events(monkeypatch, tmp_path: 
     assert "cursor:gpt-4 (2)" in out
     assert "Lock files (stale / total)" in out
     assert "This workspace" in out and tmp_path.name in out
+    head, _, tail = out.partition("This workspace")
+    assert "Session active now" in head
+    assert "Session active now" in tail
+    # Global panel uses machine-wide live count (1); workspace panel is scoped to primary (patched 0).
+    assert "| 1" in head or "│ 1" in head
+    assert "| 0" in tail or "│ 0" in tail
     assert "codex (1)" in out
     assert "codex:o1 (1)" in out
     assert "Recent events" in out
